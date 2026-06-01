@@ -43,32 +43,6 @@ Khi phát hiện **va chạm giao thông**, hệ thống sẽ:
 
 ---
 
-## 🧠 Kiến trúc tổng thể hệ thống
-
-```mermaid
-graph TD
-    subgraph "Phần cứng - Mũ bảo hiểm"
-        MPU["MPU6050<br/>Gia tốc 3 trục"] -->|I2C| ESP["ESP32<br/>Xử lý trung tâm"]
-        GPS["GPS NEO-6M<br/>Định vị"] -->|UART| ESP
-    end
-
-    subgraph "Xử lý trên ESP32"
-        ESP -->|1000 Hz| FFT["FFT 512 điểm<br/>5 dải tần"]
-        FFT -->|8 features| LR["Logistic Regression<br/>On-device Training"]
-        LR -->|p impact| DECISION{"Phát hiện<br/>va chạm?"}
-    end
-
-    subgraph "Cảnh báo"
-        DECISION -->|BLE| APP["Flutter App<br/>Hiển thị GPS + Alert"]
-        DECISION -->|WiFi| TG["Telegram Bot<br/>Gửi vị trí + ảnh"]
-        APP -->|Nút bấm| SOS["SOS / TÔI ỔN"]
-    end
-
-    subgraph "Lưu trữ"
-        APP -->|HTTP| BE["Backend Node.js<br/>Express + MongoDB"]
-    end
-```
-
 ### Cấu trúc thư mục
 
 ```
