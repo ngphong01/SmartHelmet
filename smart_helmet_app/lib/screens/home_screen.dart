@@ -232,6 +232,7 @@ class _DashboardView extends StatelessWidget {
               ControlButtons(
                 onAck: () => ble.sendAck(),
                 onSos: () => _handleSos(context, ble),
+                onTestImpact: () => ble.sendTestImpact(),
               ),
               if (data != null) ...[
                 const SizedBox(height: 24),

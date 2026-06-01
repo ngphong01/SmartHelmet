@@ -4,35 +4,59 @@ import 'package:flutter/services.dart';
 class ControlButtons extends StatelessWidget {
   final VoidCallback onAck;
   final VoidCallback onSos;
-  const ControlButtons({super.key, required this.onAck, required this.onSos});
+  final VoidCallback onTestImpact;
+  const ControlButtons({
+    super.key,
+    required this.onAck,
+    required this.onSos,
+    required this.onTestImpact,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: _StaticButton(
-            label: 'TÔI ỔN',
-            icon: Icons.check_circle_rounded,
-            gradient: const [Color(0xFF10B981), Color(0xFF059669)],
-            glowColor: const Color(0xFF10B981),
-            onTap: () {
-              HapticFeedback.mediumImpact();
-              onAck();
-            },
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: _StaticButton(
+                label: 'TÔI ỔN',
+                icon: Icons.check_circle_rounded,
+                gradient: const [Color(0xFF10B981), Color(0xFF059669)],
+                glowColor: const Color(0xFF10B981),
+                onTap: () {
+                  HapticFeedback.mediumImpact();
+                  onAck();
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _PulseButton(
+                label: 'SOS',
+                icon: Icons.warning_rounded,
+                gradient: const [Color(0xFFEF4444), Color(0xFFDC2626)],
+                glowColor: const Color(0xFFEF4444),
+                pulse: true,
+                onTap: () {
+                  HapticFeedback.heavyImpact();
+                  onSos();
+                },
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _PulseButton(
-            label: 'SOS',
-            icon: Icons.warning_rounded,
-            gradient: const [Color(0xFFEF4444), Color(0xFFDC2626)],
-            glowColor: const Color(0xFFEF4444),
-            pulse: true,
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: _StaticButton(
+            label: '🧪 TEST VA CHẠM',
+            icon: Icons.science_rounded,
+            gradient: const [Color(0xFFF59E0B), Color(0xFFD97706)],
+            glowColor: const Color(0xFFF59E0B),
             onTap: () {
               HapticFeedback.heavyImpact();
-              onSos();
+              onTestImpact();
             },
           ),
         ),

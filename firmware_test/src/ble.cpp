@@ -104,13 +104,58 @@ void ble_send_text(const char *s)
   if (!pNotifyChar)
     return;
   size_t len = strlen(s);
-  // Thêm \n để Flutter parser nhận biết kết thúc dòng JSON
-  char buf[len + 2];
-  memcpy(buf, s, len);
-  buf[len] = '\n';
-  buf[len + 1] = '\0';
-  pNotifyChar->setValue((uint8_t *)buf, len + 1);
-  pNotifyChar->notify();
+  if (len == 0)
+    return;
+
+  // MTU=185 → payload tối đa 182 byte (185 - 3 byte ATT header)
+  // Dùng 180 byte để an toàn, chừa 2 byte dư
+  const size_t CHUNK = 180;
+
+  size_t offset = 0;
+  while (offset < len)
+  {
+    size_t chunkLen = (len - offset > CHUNK) ? CHUNK : (len - offset);
+
+    // Gộp \n vào chunk CUỐI CÙNG để tiết kiệm 1 notify
+    if (offset + chunkLen >= len && chunkLen < CHUNK)
+    {
+      // Chunk cuối còn đủ chỗ để nhét \n
+      uint8_t buf[CHUNK + 1];
+      memcpy(buf, s + offset, chunkLen);
+      buf[chunkLen] = '\n';
+      pNotifyChar->setValue(buf, chunkLen + 1);
+    }
+    else
+    {
+      pNotifyChar->setValue((uint8_t *)(s + offset), chunkLen);
+    }
+
+    pNotifyChar->notify();
+    offset += chunkLen;
+
+    // Delay 25ms giữa các chunk để BLE stack kịp gửi
+    // Tránh notify() ghi đè buffer nội bộ khi stack còn bận
+    delay(25);
+  }
+
+  // Nếu chunk cuối đã đầy 180 byte (không nhét được \n) → gửi \n riêng
+  if (len > 0)
+  {
+    size_t lastChunkLen = len % CHUNK;
+    if (lastChunkLen == 0)
+      lastChunkLen = CHUNK; // trường hợp len chia hết cho 180
+
+    // \n đã được gộp vào chunk cuối nếu lastChunkLen < CHUNK
+    // Chỉ cần gửi \n riêng nếu chunk cuối đầy 180 byte
+    if (lastChunkLen == CHUNK)
+    {
+      delay(10);
+      pNotifyChar->setValue((uint8_t *)"\n", 1);
+      pNotifyChar->notify();
+    }
+  }
+
+  Serial.printf("[BLE][TX] Da gui %u bytes JSON (%d chunk)\n", (unsigned)len, (int)((len + CHUNK - 1) / CHUNK));
 }
 
 // ======= getters trạng thái =======

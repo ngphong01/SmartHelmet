@@ -24,13 +24,13 @@ static const int STEP = WIN_N / 2;             // overlap 50%
 static const float ACCEL_SENS = ACCEL_SENS_4G; // từ config.h (8192.0f)
 
 // Ngưỡng xác suất để coi là impact
-static const float IMPACT_THRESH = TEST_MODE ? 0.30f : 0.97f;
+static const float IMPACT_THRESH = TEST_MODE ? 0.25f : 0.97f;
 
-static const float PEAK_G_MIN = TEST_MODE ? 1.2f : 2.8f;
+static const float PEAK_G_MIN = TEST_MODE ? 0.8f : 2.8f;
 
 // Thời gian chống dính (debounce) cho impact, ms
 static const uint32_t IMPACT_DEBOUNCE_MS = 5000;
-static const uint8_t IMPACT_CONFIRM_WINDOWS = 2;
+static const uint8_t IMPACT_CONFIRM_WINDOWS = TEST_MODE ? 1 : 2;
 static const uint32_t DEBUG_PRINT_PERIOD_MS = 2000;
 static const uint32_t GPS_PRINT_PERIOD_MS = 5000;
 

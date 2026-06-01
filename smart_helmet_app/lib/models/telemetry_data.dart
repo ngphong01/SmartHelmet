@@ -30,11 +30,15 @@ class TelemetryData {
       utcTime: map['time']?['utc'] != null
           ? DateTime.tryParse(map['time']['utc'])
           : null,
-      timestampMs: map['ts'] != null ? int.tryParse(map['ts'].toString()) : null,
+      timestampMs: map['ts'] != null
+          ? int.tryParse(map['ts'].toString())
+          : null,
     );
   }
 
-  bool get hasGps => gps != null && gps!.lat != 0 && gps!.lon != 0;
+  /// GPS được coi là hợp lệ khi có tọa độ khác 0 VÀ có ít nhất 3 vệ tinh
+  bool get hasGps =>
+      gps != null && gps!.lat != 0.0 && gps!.lon != 0.0 && gps!.satellites >= 3;
   bool get isImpact => impact?.detected == true;
 }
 

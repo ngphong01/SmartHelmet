@@ -115,6 +115,15 @@ class BleService extends ChangeNotifier {
           await _device!.connect(autoConnect: false);
         }
         await _device!.discoverServices();
+
+        // === YÊU CẦU MTU 512 ĐỂ JSON 500 BYTE VỪA 1 GÓI ===
+        try {
+          final mtu = await _device!.requestMtu(512);
+          debugPrint('[BLE] 📡 MTU negotiated: $mtu bytes');
+        } catch (e) {
+          debugPrint('[BLE] ⚠️ Không thể request MTU 512: $e');
+          // Fallback: firmware sẽ tự chunk 180 byte
+        }
       } catch (e) {
         debugPrint('[BLE] Lỗi connect device: $e');
         try {
@@ -196,73 +205,53 @@ class BleService extends ChangeNotifier {
   /// Gửi SOS (cứu hộ khẩn cấp)
   Future<void> sendSos() => sendCommand('SOS');
 
+  /// Gửi TEST_IMPACT (giả lập va chạm để kiểm tra)
+  Future<void> sendTestImpact() => sendCommand('TEST_IMPACT');
+
   /// Dừng stream dữ liệu
   Future<void> sendStop() => sendCommand('STOP');
 
   /// Xử lý dữ liệu nhận được từ mũ (có buffer cho dữ liệu phân mảnh)
   void _onDataReceived(List<int> data) {
-    // DEBUG: Log raw để xem data có vào không
+    if (data.isEmpty) return;
+
+    // DEBUG: Log raw data
+    final rawStr = String.fromCharCodes(data);
     debugPrint(
-      '[BLE] RAW (${data.length}B): ${String.fromCharCodes(data).substring(0, data.length < 200 ? data.length : 200)}',
+      '[BLE] 📥 RAW (${data.length}B): ${rawStr.length > 120 ? '${rawStr.substring(0, 120)}...' : rawStr}',
     );
 
     try {
       _buffer += utf8.decode(data);
-      debugPrint('[BLE] BUFFER length: ${_buffer.length}');
 
-      // Parse JSON theo \n hoặc theo cặp dấu {} hoàn chỉnh
+      // Parse JSON theo \n delimiter
       while (true) {
-        // Cách 1: tìm \n
         final nlIdx = _buffer.indexOf('\n');
-        final useNewline = nlIdx != -1;
+        if (nlIdx == -1) break; // Chưa có delimiter → đợi thêm data
 
-        if (useNewline) {
-          final line = _buffer.substring(0, nlIdx).trim();
-          _buffer = _buffer.substring(nlIdx + 1);
+        final line = _buffer.substring(0, nlIdx).trim();
+        _buffer = _buffer.substring(nlIdx + 1);
+
+        debugPrint(
+          '[BLE] 📋 Line (${line.length} chars): ${line.length > 120 ? '${line.substring(0, 120)}...' : line}',
+        );
+
+        if (line.isNotEmpty && line.startsWith('{')) {
+          _tryParseJson(line);
+        } else if (line.isNotEmpty) {
           debugPrint(
-            '[BLE] 📋 Line found (${line.length} chars): ${line.substring(0, line.length < 150 ? line.length : 150)}',
+            '[BLE] ⚠️ Line không phải JSON, skip: "${line.length > 50 ? '${line.substring(0, 50)}...' : line}"',
           );
-          if (line.isNotEmpty && line.startsWith('{')) {
-            _tryParseJson(line);
-          } else {
-            debugPrint(
-              '[BLE] ⚠️ Line skipped (starts with "${line.isNotEmpty ? line[0] : "empty"}")',
-            );
-          }
-          continue;
         }
-
-        // Cách 2: tìm JSON hoàn chỉnh bằng dấu {}
-        final start = _buffer.indexOf('{');
-        if (start == -1) {
-          _buffer = '';
-          break;
-        }
-        if (start > 0) _buffer = _buffer.substring(start);
-
-        int depth = 0, end = -1;
-        for (int i = 0; i < _buffer.length; i++) {
-          if (_buffer[i] == '{')
-            depth++;
-          else if (_buffer[i] == '}') {
-            depth--;
-            if (depth == 0) {
-              end = i;
-              break;
-            }
-          }
-        }
-        if (end == -1) break; // Chưa có JSON hoàn chỉnh
-
-        final json = _buffer.substring(0, end + 1);
-        _buffer = _buffer.substring(end + 1);
-        _tryParseJson(json);
       }
 
-      if (_buffer.length > 4096)
-        _buffer = _buffer.substring(_buffer.length - 2048);
+      // Giới hạn buffer tránh memory leak nếu data lỗi
+      if (_buffer.length > 8192) {
+        debugPrint('[BLE] ⚠️ Buffer quá dài (${_buffer.length}), reset');
+        _buffer = '';
+      }
     } catch (e) {
-      debugPrint('[BLE] Lỗi decode: $e');
+      debugPrint('[BLE] ❌ Lỗi decode buffer: $e');
       _buffer = '';
     }
   }
