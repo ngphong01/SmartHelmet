@@ -1,6 +1,6 @@
 // app/api/index.ts
 import * as Location from 'expo-location';
-import { API_URL } from '../constants/index';
+import { API_KEY, API_URL } from '../constants/index';
 
 export const sendImpactToServer = async (data?: { ai_p?: number }) => {
   try {
@@ -14,19 +14,32 @@ export const sendImpactToServer = async (data?: { ai_p?: number }) => {
 
     const location = await Location.getCurrentPositionAsync({});
     const payload = {
+      schema_version: 2,
       helmet_id: 'H001',
-      lat: location.coords.latitude,
-      lon: location.coords.longitude,
-      speed: (location.coords.speed ?? 0) * 3.6,
-      impact: true,
-      ai_p: data?.ai_p ?? null,
+      device_type: 'helmet',
+      gps: {
+        lat: location.coords.latitude,
+        lon: location.coords.longitude,
+        speed_kmh: (location.coords.speed ?? 0) * 3.6,
+        satellites: null,
+        hdop: null,
+      },
+      impact: {
+        detected: true,
+        ai_p: data?.ai_p ?? null,
+        peak_g: null,
+        confidence: data?.ai_p ?? null,
+      },
+      firmware: {
+        version: '1.0.0',
+        build: 'expo-app',
+      },
       ts: new Date().toISOString(),
     };
 
     console.log('Gửi payload tới:', API_URL);
     console.log('Payload:', payload);
 
-    // ⏱ timeout 10s cho rộng hơn chút
     const controller = new AbortController();
     const timeoutMs = 10000;
     const timeoutId = setTimeout(() => {
@@ -37,7 +50,10 @@ export const sendImpactToServer = async (data?: { ai_p?: number }) => {
     try {
       const res = await fetch(API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
+        },
         body: JSON.stringify(payload),
         signal: controller.signal,
       });

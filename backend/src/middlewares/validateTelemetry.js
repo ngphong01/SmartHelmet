@@ -8,11 +8,17 @@ addFormats(ajv);
 const validate = ajv.compile(schema);
 
 module.exports = function validateTelemetry(req, res, next) {
+  const apiKey = req.get('x-api-key');
+  const expected = process.env.API_KEY;
+  if (!expected || apiKey !== expected) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
   const ok = validate(req.body);
   if (!ok) {
     return res.status(400).json({
       error: 'invalid_payload',
-      details: validate.errors?.map(e => `${e.instancePath || '/'} ${e.message}`)
+      details: validate.errors?.map(e => `${e.instancePath || '/'} ${e.message}`),
     });
   }
   return next();

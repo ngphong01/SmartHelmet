@@ -5,4 +5,9 @@ export const UUIDS = {
   WRITE: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
 };
 
-export const API_URL = "http://192.168.247.253:3000/api/telemetry"; // ← IP ĐÚNG
+const DEFAULT_API_URL = "http://127.0.0.1:3000/api/telemetry";
+const EXPO_PUBLIC_API_URL = process.env.EXPO_PUBLIC_API_URL;
+const EXPO_PUBLIC_API_KEY = process.env.EXPO_PUBLIC_API_KEY;
+
+export const API_URL = EXPO_PUBLIC_API_URL || DEFAULT_API_URL;
+export const API_KEY = EXPO_PUBLIC_API_KEY || "";

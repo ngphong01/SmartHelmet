@@ -1,13 +1,21 @@
 // backend/src/utils/telegram.js
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-// TOKEN CỦA BẠN
-const TOKEN = '8217786021:AAHojN31Bx1xV_9DXK2klf5xxqIUacWFc6E';
+function getTelegramConfig() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
 
-// CHAT_ID CỦA BẠN – ĐÃ LẤY TỪ getUpdates
-const CHAT_ID = '5843805498';  // ← ĐÃ DÁN VÀO ĐÂY
+  if (!token || !chatId) return null;
+  return { token, chatId };
+}
 
 const sendTelegramAlert = async (lat, lon) => {
+  const cfg = getTelegramConfig();
+  if (!cfg) {
+    console.warn('Telegram config missing; skip alert.');
+    return;
+  }
+
   const mapsUrl = `https://maps.google.com/?q=${lat},${lon}`;
   const message = `
 *CẢNH BÁO: VA CHẠM MẠNH!*  
@@ -16,15 +24,15 @@ Thời gian: ${new Date().toLocaleString('vi-VN')}
   `.trim();
 
   try {
-    await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+    await fetch(`https://api.telegram.org/bot${cfg.token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: CHAT_ID,
+        chat_id: cfg.chatId,
         text: message,
         parse_mode: 'Markdown',
-        disable_web_page_preview: false
-      })
+        disable_web_page_preview: false,
+      }),
     });
     console.log('ĐÃ GỬI TELEGRAM:', mapsUrl);
   } catch (error) {

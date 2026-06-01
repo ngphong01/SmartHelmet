@@ -14,7 +14,7 @@ const { connectMongo } = require('./config/db');
     // THÊM '0.0.0.0' ĐỂ NGHE TỪ MẠNG LAN
     server.listen(PORT, '0.0.0.0', () => {
       logger.info(`API + Socket.IO listening on http://0.0.0.0:${PORT}`);
-      logger.info(`Truy cập từ điện thoại: http://192.168.1.113:${PORT}`);
+      logger.info(`LAN access depends on your machine IP, not a hardcoded value.`);
     });
   } catch (e) {
     logger.error('Failed to start:', e.message); 

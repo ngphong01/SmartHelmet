@@ -16,7 +16,7 @@ void run_offline_training(LogisticModel& model) {
     const float ACCEL_SENS = 8192.0f;
 
     if (TRAIN_SAMPLES < WIN_N) {
-        Serial.println("TRAIN_SAMPLES < 64, khong du du lieu train!");
+        Serial.println("[LOI][AI] Khong du du lieu train");
         return;
     }
 
@@ -24,12 +24,12 @@ void run_offline_training(LogisticModel& model) {
     float fft_feat[5];
     float feat[FEAT_DIM];  // FEAT_DIM = 8 (5 FFT + 3 accel cuối)
 
-    Serial.print("TRAIN_SAMPLES = ");
+    Serial.print("[AI] So mau train = ");
     Serial.println(TRAIN_SAMPLES);
-    Serial.println("Bat dau train tren thiet bi...");
+    Serial.println("[AI][RUN] Bat dau train tren ESP32");
 
     for (int epoch = 0; epoch < EPOCHS; ++epoch) {
-        Serial.print("Epoch ");
+        Serial.print("[AI] Vong train ");
         Serial.println(epoch);
 
         for (int start = 0; start + WIN_N <= TRAIN_SAMPLES; start += STEP) {
@@ -73,6 +73,6 @@ void run_offline_training(LogisticModel& model) {
         }
     }
 
-    Serial.println("Train xong. Vi du w[0]:");
+    Serial.println("[OK][AI] Train xong. Vi du w[0]:");
     Serial.println(model.w[0], 6);
 }

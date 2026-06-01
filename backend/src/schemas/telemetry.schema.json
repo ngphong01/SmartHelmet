@@ -1,17 +1,47 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "SmartHelmet Telemetry v1",
+  "title": "SmartHelmet Telemetry v3",
   "type": "object",
-  "required": ["helmet_id", "lat", "lon", "speed", "impact", "ts"],
+  "required": ["schema_version", "helmet_id", "device_type", "gps", "impact", "time", "ts"],
   "additionalProperties": false,
   "properties": {
+    "schema_version": { "type": "integer", "const": 3 },
     "helmet_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$" },
-    "lat":  { "type": "number", "minimum": -90,  "maximum": 90 },
-    "lon":  { "type": "number", "minimum": -180, "maximum": 180 },
-    "speed":{ "type": "number", "minimum": 0 },
-    "impact": { "type": "boolean" },
-    "ts": { "type": "string", "format": "date-time" },
-    "scenario": { "type": "integer", "minimum": 1, "maximum": 6 },
-    "crash_confirmed": { "type": "boolean" }
+    "device_type": { "type": "string", "enum": ["helmet"] },
+    "gps": {
+      "type": "object",
+      "required": ["lat", "lon"],
+      "additionalProperties": false,
+      "properties": {
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+        "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+        "speed_kmh": { "type": "number", "minimum": 0 },
+        "satellites": { "type": "integer", "minimum": 0, "maximum": 99 },
+        "hdop": { "type": "number", "minimum": 0 }
+      }
+    },
+    "impact": { "type": "object", "required": ["detected"], "additionalProperties": false, "properties": {
+      "detected": { "type": "boolean" },
+      "ai_p": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+      "peak_g": { "type": ["number", "null"], "minimum": 0 },
+      "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+    } },
+    "firmware": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "maxLength": 32 },
+        "build": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "time": {
+      "type": "object",
+      "required": ["utc"],
+      "additionalProperties": false,
+      "properties": {
+        "utc": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ts": { "type": "string", "maxLength": 32 }
   }
 }

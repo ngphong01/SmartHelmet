@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <title>SmartHelmet Controller</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="manifest" href="manifest.json" />
+  </head>
+  <body>
+    <!-- ===== HEADER ===== -->
+    <header id="header">
+      <div class="logo">
+        <span class="logo-icon">🪖</span>
+        <h1>SmartHelmet</h1>
+      </div>
+      <div id="status-badge" class="badge disconnected">
+        <span class="dot"></span>
+        <span id="status-text">Chưa kết nối</span>
+      </div>
+    </header>
+
+    <!-- ===== CONNECT PANEL ===== -->
+    <section id="connect-panel">
+      <button id="btn-connect" onclick="connectToHelmet()">
+        <span class="btn-icon">🔗</span> Kết nối Mũ Bảo Hiểm
+      </button>
+      <p class="hint">Bật Bluetooth trên điện thoại và mở nguồn mũ bảo hiểm</p>
+    </section>
+
+    <!-- ===== DASHBOARD (ẩn khi chưa kết nối) ===== -->
+    <main id="dashboard" class="hidden">
+      <!-- BẢN ĐỒ GPS -->
+      <section class="card map-card">
+        <div class="card-header">
+          <span class="card-icon">📍</span>
+          <h2>Vị trí GPS</h2>
+          <span id="gps-age" class="gps-age"></span>
+        </div>
+        <div id="map"></div>
+      </section>
+
+      <!-- TELEMETRY -->
+      <section class="card-grid">
+        <div class="card stat-card">
+          <div class="card-icon">⚡</div>
+          <div class="stat-label">Đỉnh gia tốc</div>
+          <div class="stat-value" id="stat-peak-g">--</div>
+          <div class="stat-unit">g</div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-icon">🧠</div>
+          <div class="stat-label">AI xác suất</div>
+          <div class="stat-value" id="stat-ai-p">--</div>
+          <div class="stat-unit">%</div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-icon">🛰️</div>
+          <div class="stat-label">Vệ tinh</div>
+          <div class="stat-value" id="stat-sats">--</div>
+          <div class="stat-unit"></div>
+        </div>
+        <div class="card stat-card">
+          <div class="card-icon">🏍️</div>
+          <div class="stat-label">Tốc độ</div>
+          <div class="stat-value" id="stat-speed">--</div>
+          <div class="stat-unit">km/h</div>
+        </div>
+      </section>
+
+      <!-- IMPACT ALERT -->
+      <section id="impact-alert" class="card alert-card hidden">
+        <div class="alert-icon">🚨</div>
+        <div class="alert-content">
+          <h2>CẢNH BÁO VA CHẠM!</h2>
+          <p id="alert-detail"></p>
+        </div>
+      </section>
+
+      <!-- NÚT ĐIỀU KHIỂN -->
+      <section class="control-grid">
+        <button class="ctrl-btn ctrl-ack" onclick="sendAck()">
+          <span>✅</span>
+          <span>TÔI ỔN</span>
+        </button>
+        <button class="ctrl-btn ctrl-sos" onclick="sendSos()">
+          <span>🆘</span>
+          <span>SOS</span>
+        </button>
+      </section>
+
+      <!-- RAW DATA -->
+      <section class="card log-card">
+        <div class="card-header">
+          <span class="card-icon">📡</span>
+          <h2>Dữ liệu thô</h2>
+        </div>
+        <pre id="raw-log">Đang chờ dữ liệu...</pre>
+      </section>
+    </main>
+
+    <!-- ===== FOOTER ===== -->
+    <footer>
+      <small>SmartHelmet v1.0 · Kết nối qua Bluetooth LE · Nordic UART</small>
+    </footer>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

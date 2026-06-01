@@ -13,7 +13,7 @@ uint8_t imu_whoami() {
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(REG_WHO_AM_I);
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU_ADDR, (uint8_t)1);
+  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1);
   return Wire.available() ? Wire.read() : 0xFF;
 }
 
@@ -21,7 +21,7 @@ int16_t imu_read16(uint8_t regH) {
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(regH);
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU_ADDR, (uint8_t)2);
+  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)2);
   if (Wire.available() >= 2) {
     uint8_t hi = Wire.read();
     uint8_t lo = Wire.read();
@@ -44,9 +44,9 @@ void imu_read_gyro_raw(int16_t& gx, int16_t& gy, int16_t& gz) {
 
 void imu_begin() {
   uint8_t who = imu_whoami();
-  Serial.printf("MPU6500 WHO_AM_I = 0x%02X (expected 0x70)\r\n", who);
+  Serial.printf("[IMU] WHO_AM_I = 0x%02X (mong doi 0x70)\r\n", who);
   if (who != 0x70) {
-    Serial.println("MPU6500 not found! Check wiring.");
+    Serial.println("[LOI][IMU] Khong tim thay MPU6500. Kiem tra SDA/SCL/VCC/GND.");
     while (1) delay(100);
   }
   i2cWrite8(REG_PWR_MGMT_1, 0x00); // wake
@@ -54,7 +54,7 @@ void imu_begin() {
   i2cWrite8(REG_ACCEL_CONFIG, 0x08); // ±4g
   i2cWrite8(REG_GYRO_CONFIG,  0x08); // ±500 dps
   delay(20);
-  Serial.println("MPU6500 initialized");
+  Serial.println("[OK][IMU] MPU6500 da khoi tao");
 }
 
 void imu_compute_tilt(float ax, float ay, float az, float& pitchDeg, float& rollDeg) {
@@ -70,8 +70,8 @@ void imu_compute_tilt(float ax, float ay, float az, float& pitchDeg, float& roll
 
 // Wrapper cho init
 void imu_init() {
-    Wire.begin();
-    Wire.setClock(1000000);  // 1 MHz I2C
+    Wire.begin(SDA_PIN, SCL_PIN);
+    Wire.setClock(400000);   // Stable with jumper wires.
     imu_begin();             // gọi hàm cũ của bạn
 }
 
@@ -79,11 +79,24 @@ void imu_init() {
 void imu_read(float &ax_raw, float &ay_raw, float &az_raw,
               float &gx_raw, float &gy_raw, float &gz_raw) 
 {
-    int16_t ax16, ay16, az16;
-    int16_t gx16, gy16, gz16;
+    static int16_t ax16 = 0, ay16 = 0, az16 = 0;
+    static int16_t gx16 = 0, gy16 = 0, gz16 = 0;
 
-    imu_read_accel_raw(ax16, ay16, az16);
-    imu_read_gyro_raw (gx16, gy16, gz16);
+    Wire.beginTransmission(MPU_ADDR);
+    Wire.write(REG_ACCEL_XOUT_H);
+    if (Wire.endTransmission(false) == 0) {
+        uint8_t n = Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14);
+        if (n == 14 && Wire.available() >= 14) {
+            ax16 = (int16_t)((Wire.read() << 8) | Wire.read());
+            ay16 = (int16_t)((Wire.read() << 8) | Wire.read());
+            az16 = (int16_t)((Wire.read() << 8) | Wire.read());
+            Wire.read();
+            Wire.read();
+            gx16 = (int16_t)((Wire.read() << 8) | Wire.read());
+            gy16 = (int16_t)((Wire.read() << 8) | Wire.read());
+            gz16 = (int16_t)((Wire.read() << 8) | Wire.read());
+        }
+    }
 
     ax_raw = (float)ax16;
     ay_raw = (float)ay16;
