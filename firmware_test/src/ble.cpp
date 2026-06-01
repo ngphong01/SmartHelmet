@@ -103,7 +103,13 @@ void ble_send_text(const char *s)
 {
   if (!pNotifyChar)
     return;
-  pNotifyChar->setValue((uint8_t *)s, strlen(s));
+  size_t len = strlen(s);
+  // Thêm \n để Flutter parser nhận biết kết thúc dòng JSON
+  char buf[len + 2];
+  memcpy(buf, s, len);
+  buf[len] = '\n';
+  buf[len + 1] = '\0';
+  pNotifyChar->setValue((uint8_t *)buf, len + 1);
   pNotifyChar->notify();
 }
 

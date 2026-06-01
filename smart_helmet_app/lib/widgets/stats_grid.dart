@@ -96,7 +96,7 @@ class _GlassStat extends StatelessWidget {
             ),
             child: Icon(icon, color: Colors.white, size: 18),
           ),
-          const Spacer(),
+          const SizedBox(height: 12),
           Text(
             label,
             style: TextStyle(color: Colors.white.withAlpha(120), fontSize: 11),

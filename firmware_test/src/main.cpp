@@ -212,7 +212,7 @@ static void run_detection_window()
     printGpsStatus(nowMs);
 
     // ===== 5) Gửi JSON ML + GPS qua BLE mỗi cửa sổ 512ms =====
-    char json[256];
+    char json[512];
     snprintf(json, sizeof(json),
              "{\"type\":\"telemetry\",\"schema_version\":2,\"helmet_id\":\"H001\",\"device_type\":\"helmet\","
              "\"gps\":{\"lat\":%.6f,\"lon\":%.6f,\"speed_kmh\":%.2f,\"satellites\":%u,\"hdop\":%.2f},"
