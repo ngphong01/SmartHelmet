@@ -1,10 +1,12 @@
 # 🪖 Hệ Thống Mũ Bảo Hiểm Thông Minh Ứng Dụng IoT & Machine Learning
 
 ## 📖 Giới thiệu
+
 Dự án **Hệ thống Mũ Bảo Hiểm Thông Minh** được xây dựng nhằm nâng cao an toàn cho người tham gia giao thông.  
-Hệ thống sử dụng **ESP32 + cảm biến MPU6050** để thu thập dữ liệu gia tốc, kết hợp **xử lý tín hiệu FFT** và **mô hình Logistic Regression** để phát hiện **va chạm (impact)** theo thời gian thực.  
+Hệ thống sử dụng **ESP32 + cảm biến MPU6050** để thu thập dữ liệu gia tốc, kết hợp **xử lý tín hiệu FFT** và **mô hình Logistic Regression** để phát hiện **va chạm (impact)** theo thời gian thực.
 
 Khi phát hiện va chạm nghiêm trọng, hệ thống sẽ:
+
 - Gửi cảnh báo đến ứng dụng di động qua BLE
 - Cho phép người dùng gửi tín hiệu SOS
 - Lưu dữ liệu phục vụ phân tích và đánh giá tai nạn
@@ -12,6 +14,7 @@ Khi phát hiện va chạm nghiêm trọng, hệ thống sẽ:
 ---
 
 ## 🎯 Mục tiêu dự án
+
 - Phát hiện va chạm giao thông dựa trên dữ liệu IMU
 - Phân biệt **impact / non-impact** bằng Machine Learning nhẹ, chạy trực tiếp trên ESP32
 - Kết nối với ứng dụng di động và backend để giám sát và xử lý sự cố
@@ -31,10 +34,10 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 └── smart-helmet.code-workspace
 ```
 
-
 ---
 
 ## ⚙️ Phần cứng sử dụng
+
 - **ESP32**
 - **MPU6050 (Accelerometer + Gyroscope)**
 - Smartphone (Android)
@@ -45,10 +48,11 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ## 📊 Xử lý tín hiệu & Machine Learning
 
 ### 🔹 Tiền xử lý dữ liệu
+
 - Lấy gia tốc thô theo 3 trục: `ax, ay, az`
 - Chuẩn hóa về đơn vị **g** (chia cho 8192 với ±4g)
 - Tính độ lớn gia tốc:
-  
+
 \[
 |a| = \sqrt{ax^2 + ay^2 + az^2}
 \]
@@ -56,27 +60,30 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ---
 
 ### 🔹 Phân tích FFT
+
 - Cửa sổ trượt: **512 mẫu (~0.5s)**, overlap 50%
 - FFT một phía
 - Trích xuất năng lượng ở 5 dải tần:
 
-| Band | Dải tần (Hz) | Ý nghĩa |
-|----|------------|--------|
-| 0 | 0.5 – 4 | Chuyển động nền |
-| 1 | 4 – 8 | Rung mạnh |
-| 2 | 12 – 20 | Bắt đầu va chạm |
-| 3 | 20 – 40 | Va đập mạnh |
-| 4 | 40 – 80 | Xung lực cao |
+| Band | Dải tần (Hz) | Ý nghĩa         |
+| ---- | ------------ | --------------- |
+| 0    | 0.5 – 4      | Chuyển động nền |
+| 1    | 4 – 8        | Rung mạnh       |
+| 2    | 12 – 20      | Bắt đầu va chạm |
+| 3    | 20 – 40      | Va đập mạnh     |
+| 4    | 40 – 80      | Xung lực cao    |
 
 ---
 
 ### 🔹 Feature dùng cho mô hình (8 chiều)
+
 - **5 feature FFT**: năng lượng theo 5 band
 - **3 feature thời gian**: `ax, ay, az` tại mẫu cuối cửa sổ
 
 ---
 
 ### 🔹 Mô hình phân loại
+
 - **Logistic Regression**
 - Huấn luyện trực tiếp trên ESP32 (offline training)
 - Đầu ra: xác suất va chạm `p(impact)`
@@ -84,6 +91,7 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ---
 
 ## 📱 Ứng dụng di động
+
 - Nhận dữ liệu va chạm từ ESP32 qua BLE
 - Hiển thị trạng thái impact / non-impact
 - Gửi tín hiệu SOS trong trường hợp khẩn cấp
@@ -91,6 +99,7 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ---
 
 ## 🌐 Backend
+
 - Lưu trữ dữ liệu sự kiện va chạm
 - Quản lý thông tin người dùng
 - Phục vụ mở rộng hệ thống trong tương lai
@@ -98,6 +107,7 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ---
 
 ## 🚀 Kết quả đạt được
+
 - Phát hiện va chạm theo thời gian thực
 - Phân biệt rõ impact và non-impact dựa trên phổ tần số
 - Mô hình nhẹ, chạy ổn định trên vi điều khiển
@@ -106,6 +116,7 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ---
 
 ## 📌 Định hướng phát triển
+
 - Tích hợp GPS để gửi vị trí tai nạn
 - Phân loại mức độ va chạm (nhẹ / nặng)
 - Kết nối mạng IoT (4G / MQTT)
@@ -114,6 +125,8 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ---
 
 ## 👨‍🎓 Tác giả
+
 - Sinh viên: **[Đào Văn Phong]**
-- Ngành: Công nghệ Thông tin
+- Ngành: Phân Tích Dữ Liệu
 - Trường: **Học Viện Công Nghệ Bưu Chính Viễn Thông**
+
