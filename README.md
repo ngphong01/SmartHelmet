@@ -114,7 +114,6 @@ He-Thong-Mu-Bao-Hiem-Thong-Minh/
 ---
 
 ## 👨‍🎓 Tác giả
-- Sinh viên: **[Tạ Long Khánh]**
+- Sinh viên: **[Đào Văn Phong]**
 - Ngành: Công nghệ Thông tin
-- Trường: **Đại học Xây dựng Hà Nội**
-- Đồ án tốt nghiệp
+- Trường: **Học Viện Công Nghệ Bưu Chính Viễn Thông**
