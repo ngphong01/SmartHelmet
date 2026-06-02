@@ -600,32 +600,6 @@ Chi tiết tại [TESTING.md](TESTING.md). Tóm tắt:
 | Flutter UI              | 12      | 11     | 1     | theme dark      |
 | **Tổng cộng**           | **50**  | **48** | **2** | **96% pass**    |
 
-## 📸 Ảnh chụp màn hình
-
-> _(đặt ảnh vào thư mục `docs/images/`)_
-
-### Mobile App
-
-|             Home Dashboard              |          Impact Alert           |               History               |
-| :-------------------------------------: | :-----------------------------: | :---------------------------------: |
-| ![Dashboard](docs/images/dashboard.png) | ![Alert](docs/images/alert.png) | ![History](docs/images/history.png) |
-
-### Web Dashboard
-
-![Web Dashboard](docs/images/web_dashboard.png)
-
-### Telegram Alert
-
-|                       Va chạm                       |                     Ngã xe                      |
-| :-------------------------------------------------: | :---------------------------------------------: |
-| ![Telegram Impact](docs/images/telegram_impact.png) | ![Telegram Fall](docs/images/telegram_fall.png) |
-
-### Phần cứng
-
-|                 Mặt ngoài mũ                  |         Bên trong (ESP32 + sensors)         |
-| :-------------------------------------------: | :-----------------------------------------: |
-| ![Helmet outside](docs/images/helmet_out.jpg) | ![Helmet inside](docs/images/helmet_in.jpg) |
-
 ## ⚠️ Hạn chế
 
 1. **BLE phụ thuộc điện thoại** — nếu điện thoại văng xa khi tai nạn, ESP32 dùng WiFi + buffer retry. Cần SIM 4G để độc lập hoàn toàn
