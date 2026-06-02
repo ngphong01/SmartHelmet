@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/telemetry_data.dart';
 import '../services/ble_service.dart';
+import '../utils/app_logger.dart';
 
 class ImpactAlertScreen extends StatefulWidget {
   final TelemetryData data;
@@ -17,6 +18,9 @@ class ImpactAlertScreen extends StatefulWidget {
   // 🔴 SỐ ĐIỆN THOẠI KHẨN CẤP - NGƯỜI THÂN
   static const emergencyPhone = '0868314386';
 
+  /// Có phải fall (ngã xe) không
+  bool get _isFall => widget.data.impact?.isFall == true;
+
   @override
   State<ImpactAlertScreen> createState() => _ImpactAlertScreenState();
 }
@@ -26,41 +30,50 @@ class _ImpactAlertScreenState extends State<ImpactAlertScreen>
   late AnimationController _pulse;
   int _countdown = 30;
   bool _done = false;
+  bool _holdingAck = false;
+  double _holdProgress = 0.0;
   Timer? _countdownTimer;
   Timer? _autoCallTimer;
   Timer? _autoSosTimer;
+  Timer? _holdTimer;
+  Timer? _rumbleTimer;
+
+  static const _callAfter = 15;
+  static const _sosAfter = 30;
+  static const _holdDur = Duration(seconds: 2);
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    )..repeat(reverse: true);
+    _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 600))..repeat(reverse: true);
     HapticFeedback.heavyImpact();
 
-    // Đếm ngược hiển thị - dùng Timer thay vì Future.doWhile
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted || _done) {
-        timer.cancel();
-        return;
-      }
-      setState(() => _countdown--);
-      if (_countdown <= 0) timer.cancel();
+    // Rung liên tục
+    _rumbleTimer = Timer.periodic(const Duration(milliseconds: 800), (t) {
+      if (!mounted || _done) t.cancel();
+      else HapticFeedback.heavyImpact();
     });
 
-    // 🤕 TỰ ĐỘNG GỌI sau 15 giây nếu bất tỉnh
-    _autoCallTimer = Timer(const Duration(seconds: 15), () {
+    // Đếm ngược
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted || _done) { t.cancel(); return; }
+      setState(() { _countdown--; if (_countdown == _callAfter) HapticFeedback.heavyImpact(); });
+      if (_countdown <= 0) t.cancel();
+    });
+
+    // Tự động gọi sau 15s
+    _autoCallTimer = Timer(Duration(seconds: _callAfter), () {
       if (mounted && !_done) _callEmergency();
     });
 
-    // 🆘 Tự động SOS sau 30 giây
-    _autoSosTimer = Timer(const Duration(seconds: 31), () {
-      if (mounted && !_done) {
-        widget.bleService.sendSos();
-        Navigator.of(context).pop();
-      }
+    // Tự động SOS sau 30s
+    _autoSosTimer = Timer(Duration(seconds: _sosAfter + 1), () {
+      if (mounted && !_done) { widget.bleService.sendSos(); Navigator.of(context).pop(); }
     });
+
+    logImpact('ALERT', widget.data.impact?.isFall == true
+        ? '🛑 FALL! pitch=${widget.data.imu?.pitchDeg.toStringAsFixed(1) ?? "?"}°'
+        : '🚨 IMPACT! peak=${widget.data.impact?.peakG.toStringAsFixed(2) ?? "?"}g');
   }
 
   @override
@@ -69,14 +82,39 @@ class _ImpactAlertScreenState extends State<ImpactAlertScreen>
     _countdownTimer?.cancel();
     _autoCallTimer?.cancel();
     _autoSosTimer?.cancel();
+    _holdTimer?.cancel();
+    _rumbleTimer?.cancel();
     super.dispose();
   }
 
-  void _ack() => _dismiss(() => widget.bleService.sendAck());
-  void _sos() => _dismiss(() => widget.bleService.sendSos());
-  void _dismiss(VoidCallback action) {
-    setState(() => _done = true);
-    action();
+  void _onHoldStart(_) {
+    setState(() { _holdingAck = true; _holdProgress = 0.0; });
+    HapticFeedback.mediumImpact();
+    final start = DateTime.now();
+    _holdTimer = Timer.periodic(const Duration(milliseconds: 50), (t) {
+      if (!mounted) { t.cancel(); return; }
+      final p = (DateTime.now().difference(start).inMilliseconds / _holdDur.inMilliseconds).clamp(0.0, 1.0);
+      setState(() => _holdProgress = p);
+      if (p >= 1.0) { t.cancel(); _ack(); }
+    });
+  }
+
+  void _onHoldEnd(_) { _holdTimer?.cancel(); setState(() { _holdingAck = false; _holdProgress = 0.0; }); }
+
+  void _ack() {
+    final elapsed = _sosAfter - _countdown;
+    logInfo('UI', '👍 User giu TOI ON (sau ${elapsed}s)');
+    incrementAck();
+    _done = true;
+    widget.bleService.sendAck();
+    Navigator.of(context).pop();
+  }
+
+  void _sos() {
+    logWarn('UI', '🆘 User TAP SOS!');
+    incrementSos();
+    _done = true;
+    widget.bleService.sendSos();
     Navigator.of(context).pop();
   }
 
@@ -100,36 +138,103 @@ class _ImpactAlertScreenState extends State<ImpactAlertScreen>
   Widget build(BuildContext context) {
     final d = widget.data;
     final hasGps = d.hasGps;
+    final urgent = _countdown <= _callAfter;
+    final callP = 1.0 - (_countdown / _sosAfter);
 
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF1A0000), Color(0xFF0A0E21), Color(0xFF0A0E21)],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AnimatedBuilder(
-                    animation: _pulse,
-                    builder: (_, child) => Transform.scale(
-                      scale: 1.0 + _pulse.value * 0.12,
-                      child: child,
-                    ),
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        body: AnimatedBuilder(
+          animation: _pulse,
+          builder: (_, __) => Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                colors: urgent
+                    ? [const Color(0xFF330000), const Color(0xFF1A0000), const Color(0xFF0A0E21)]
+                    : [const Color(0xFF1A0000), const Color(0xFF0A0E21), const Color(0xFF0A0E21)],
+              ),
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(children: [
+                  const Spacer(flex: 1),
+                  // Icon pulse
+                  Transform.scale(
+                    scale: 1.0 + _pulse.value * 0.15,
                     child: Container(
-                      width: 110,
-                      height: 110,
+                      width: 100, height: 100,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFF4444), Color(0xFFCC0000)],
+                        gradient: const LinearGradient(colors: [Color(0xFFFF4444), Color(0xFFCC0000)]),
+                        boxShadow: [BoxShadow(color: const Color(0xFFFF0000).withAlpha(urgent ? 180 : 100), blurRadius: urgent ? 60 : 40, spreadRadius: urgent ? 16 : 8)],
+                      ),
+                      child: Center(child: Text(_isFall ? '🛑' : '🚨', style: const TextStyle(fontSize: 44))),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // Title
+                  Text(_isFall ? 'PHÁT HIỆN NGÃ XE!' : 'CẢNH BÁO VA CHẠM!',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.red, letterSpacing: 2)),
+                  if (_isFall)
+                    const Padding(padding: EdgeInsets.only(top: 8), child: Text('Mũ nghiêng > 55° — có thể bạn đã ngã!', textAlign: TextAlign.center, style: TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.w500))),
+                  const SizedBox(height: 12),
+                  // Countdown ring
+                  SizedBox(width: 130, height: 130, child: Stack(alignment: Alignment.center, children: [
+                    SizedBox(width: 130, height: 130, child: CircularProgressIndicator(value: callP, strokeWidth: 8, backgroundColor: Colors.white10, valueColor: AlwaysStoppedAnimation<Color>(urgent ? Colors.red : const Color(0xFFFF6B35)))),
+                    Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text('$_countdown', style: TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: urgent ? Colors.red : Colors.white)),
+                      const Text('giây', style: TextStyle(color: Colors.white54, fontSize: 14)),
+                    ]),
+                  ])),
+                  const SizedBox(height: 8),
+                  Text(urgent ? '⏱ Tự động gọi cứu hộ!' : 'Tự động SOS sau $_countdown giây', style: TextStyle(color: urgent ? Colors.redAccent : Colors.white38, fontSize: 12)),
+                  const SizedBox(height: 16),
+                  // Info cards
+                  Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.red.withAlpha(60)), color: Colors.red.withAlpha(15)),
+                    child: Column(children: [
+                      _infoRow('⚡ Peak G', '${d.impact?.peakG.toStringAsFixed(2) ?? "?"} g'),
+                      _infoRow('🧠 AI', '${((d.impact?.aiP ?? 0) * 100).toStringAsFixed(1)}%'),
+                      if (_isFall) ...[_infoRow('📐 Pitch', '${d.imu?.pitchDeg.toStringAsFixed(1) ?? "?"}°'), _infoRow('📐 Roll', '${d.imu?.rollDeg.toStringAsFixed(1) ?? "?"}°')],
+                      if (hasGps) ...[const SizedBox(height: 6), Container(height: 1, color: Colors.white10), const SizedBox(height: 6), _infoRow('📍 Vĩ độ', d.gps!.lat.toStringAsFixed(5)), _infoRow('📍 Kinh độ', d.gps!.lon.toStringAsFixed(5)), _infoRow('🏍️ Tốc độ', '${d.gps!.speedKmh.toStringAsFixed(1)} km/h')],
+                    ]),
+                  ),
+                  const Spacer(flex: 2),
+                  // HOLD TO CONFIRM
+                  GestureDetector(
+                    onLongPressStart: _onHoldStart, onLongPressEnd: _onHoldEnd, onLongPressCancel: _onHoldEnd,
+                    child: AnimatedContainer(duration: const Duration(milliseconds: 100), width: double.infinity, height: 100,
+                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(20),
+                        gradient: LinearGradient(colors: _holdingAck ? [const Color(0xFF34D399), const Color(0xFF059669)] : [const Color(0xFF10B981), const Color(0xFF047857)]),
+                        boxShadow: [BoxShadow(color: const Color(0xFF10B981).withAlpha(_holdingAck ? 180 : 80), blurRadius: 20, spreadRadius: 4)]),
+                      child: Stack(alignment: Alignment.center, children: [
+                        if (_holdingAck) Positioned.fill(child: ClipRRect(borderRadius: BorderRadius.circular(20), child: Align(alignment: Alignment.centerLeft, child: Container(width: MediaQuery.of(context).size.width * _holdProgress, color: Colors.white.withAlpha(30))))),
+                        Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 36), const SizedBox(height: 4),
+                          Text(_holdingAck ? '${(_holdProgress * 100).toInt()}% — GIỮ TIẾP...' : 'TÔI ỔN', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                          if (!_holdingAck) const Text('(giữ 2 giây)', style: TextStyle(color: Colors.white60, fontSize: 11)),
+                        ]),
+                      ]),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // SOS + Call row
+                  Row(children: [
+                    Expanded(child: _smallBtn('🆘 SOS', Colors.red, _sos)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _smallBtn('📞 ${ImpactAlertScreen.emergencyPhone}', const Color(0xFFFF6B35), _callEmergency)),
+                  ]),
+                  const SizedBox(height: 16),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
                         ),
                         boxShadow: [
                           BoxShadow(
@@ -145,15 +250,28 @@ class _ImpactAlertScreenState extends State<ImpactAlertScreen>
                     ),
                   ),
                   const SizedBox(height: 32),
-                  const Text(
-                    'CẢNH BÁO VA CHẠM!',
-                    style: TextStyle(
+                  Text(
+                    _isFall ? '🛑 PHÁT HIỆN NGA XE!' : '🚨 CẢNH BÁO VA CHẠM!',
+                    style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
                       color: Colors.red,
                       letterSpacing: 2,
                     ),
                   ),
+                  if (_isFall)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Mũ bị nghiêng quá 55° — có thể bạn đã ngã!\nHãy xác nhận nếu bạn ổn.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 20),
                   Container(
                     padding: const EdgeInsets.all(18),
@@ -201,17 +319,42 @@ class _ImpactAlertScreenState extends State<ImpactAlertScreen>
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
+                  // TÔI ỔN - NÚT TO 50% MÀN HÌNH
+                  SizedBox(
+                    width: double.infinity,
+                    height: 100,
+                    child: ElevatedButton(
+                      onPressed: _ack,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        elevation: 8,
+                        shadowColor: const Color(0xFF10B981).withAlpha(100),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.check_circle_rounded, size: 40),
+                          SizedBox(width: 16),
+                          Text(
+                            'TÔI ỔN',
+                            style: TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // SOS + GỌI CỨU HỘ
                   Row(
                     children: [
-                      Expanded(
-                        child: _btn(
-                          'TÔI ỔN',
-                          Icons.check_circle_rounded,
-                          const Color(0xFF10B981),
-                          _ack,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
                       Expanded(
                         child: _btn(
                           'SOS',
@@ -220,14 +363,16 @@ class _ImpactAlertScreenState extends State<ImpactAlertScreen>
                           _sos,
                         ),
                       ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _btn(
+                          '📞 ${ImpactAlertScreen.emergencyPhone}',
+                          Icons.phone_rounded,
+                          const Color(0xFFFF6B35),
+                          _callEmergency,
+                        ),
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  // 📞 Nút gọi khẩn cấp
-                  _btnFull(
-                    '📞 GỌI CỨU HỘ ${ImpactAlertScreen.emergencyPhone}',
-                    const Color(0xFFFF6B35),
-                    _callEmergency,
                   ),
                 ],
               ),
@@ -238,80 +383,13 @@ class _ImpactAlertScreenState extends State<ImpactAlertScreen>
     );
   }
 
-  Widget _row(String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white54, fontSize: 14),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    ),
-  );
+  Widget _infoRow(String l, String v) => Padding(padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      Text(l, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+      Text(v, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+    ]));
 
-  Widget _btn(String label, IconData icon, Color color, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: color.withAlpha(120), width: 2),
-            gradient: LinearGradient(
-              colors: [color.withAlpha(35), color.withAlpha(10)],
-            ),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 38),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                  letterSpacing: 2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-  Widget _btnFull(String label, Color color, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: color.withAlpha(120), width: 2),
-            gradient: LinearGradient(
-              colors: [color.withAlpha(35), color.withAlpha(10)],
-            ),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w800,
-              fontSize: 16,
-              letterSpacing: 1.5,
-            ),
-          ),
-        ),
-      );
+  Widget _smallBtn(String label, Color color, VoidCallback onTap) => SizedBox(height: 50,
+    child: ElevatedButton(onPressed: onTap, style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 4),
+      child: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800))));
 }

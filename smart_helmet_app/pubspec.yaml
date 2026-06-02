@@ -26,6 +26,22 @@ dependencies:
   # Gọi điện thoại khẩn cấp
   url_launcher: ^6.3.0
 
+  # Foreground Service + Wake Lock (Android)
+  flutter_foreground_task: ^8.17.0
+  wakelock_plus: ^1.2.0
+
+  # File export for logs
+  path_provider: ^2.1.0
+
+  # Live chart (accelerometer realtime)
+  fl_chart: ^0.69.0
+
+  # Text-to-speech for emergency alerts
+  flutter_tts: ^4.2.0
+
+  # Shared preferences for settings
+  shared_preferences: ^2.3.0
+
   # Cupertino icons
   cupertino_icons: ^1.0.8
 

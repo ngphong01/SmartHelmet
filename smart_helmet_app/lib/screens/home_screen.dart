@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import '../services/ble_service.dart';
+import '../models/telemetry_data.dart';
 import '../widgets/connection_status.dart';
 import '../widgets/gps_map.dart';
 import '../widgets/stats_grid.dart';
 import '../widgets/control_buttons.dart';
+import 'settings_screen.dart';
+import 'history_screen.dart';
 
 // Pre-define const gradients for performance
 const _bgGradient = LinearGradient(
@@ -226,6 +229,9 @@ class _DashboardView extends StatelessWidget {
               const _SectionTitle('📊 CẢM BIẾN', 'REAL-TIME'),
               const SizedBox(height: 10),
               StatsGrid(data: data),
+              const SizedBox(height: 20),
+              // ─── RIDE STATE CARD ───
+              _RideStateCard(data: data),
               const SizedBox(height: 24),
               const _SectionTitle('🎮 ĐIỀU KHIỂN', ''),
               const SizedBox(height: 10),
@@ -399,6 +405,26 @@ class _Header extends StatelessWidget {
           ],
         ),
         const Spacer(),
+        IconButton(
+          icon: const Icon(Icons.history, color: Colors.white38, size: 22),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const HistoryScreen()),
+          ),
+        ),
+        const SizedBox(width: 12),
+        IconButton(
+          icon: const Icon(Icons.settings, color: Colors.white38, size: 22),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          ),
+        ),
+        const SizedBox(width: 8),
         ConnectionStatusBar(state: ble.state),
       ],
     );
@@ -481,6 +507,113 @@ class _RawJsonCard extends StatelessWidget {
           fontFamily: 'monospace',
           height: 1.6,
         ),
+      ),
+    );
+  }
+}
+
+// ─── RIDE STATE CARD ──────────────────────────────────────────
+class _RideStateCard extends StatelessWidget {
+  final TelemetryData? data;
+  const _RideStateCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = data?.state?.rideState ?? 'IDLE';
+    final isEmergency = data?.state?.isEmergency ?? false;
+    final fallDetected = data?.state?.fallDetected ?? false;
+    final speed = data?.gps?.speedKmh ?? 0.0;
+    final uptime = data?.state?.uptimeSeconds ?? 0;
+    final mins = uptime ~/ 60;
+    final secs = uptime % 60;
+
+    Color stateColor;
+    IconData stateIcon;
+    String stateLabel;
+    switch (state) {
+      case 'RIDING':
+        stateColor = Colors.greenAccent;
+        stateIcon = Icons.directions_bike;
+        stateLabel = 'ĐANG ĐI XE';
+        break;
+      case 'IMPACT':
+        stateColor = Colors.redAccent;
+        stateIcon = Icons.car_crash;
+        stateLabel = 'VA CHẠM!';
+        break;
+      case 'FALLEN':
+        stateColor = Colors.orangeAccent;
+        stateIcon = Icons.person_off;
+        stateLabel = 'NGÃ XE!';
+        break;
+      case 'SOS':
+        stateColor = Colors.red;
+        stateIcon = Icons.warning;
+        stateLabel = 'SOS!';
+        break;
+      default:
+        stateColor = Colors.blueAccent;
+        stateIcon = Icons.pause_circle;
+        stateLabel = 'ĐANG CHỜ';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: [stateColor.withAlpha(20), stateColor.withAlpha(5)],
+        ),
+        border: Border.all(color: stateColor.withAlpha(isEmergency ? 200 : 60)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: stateColor.withAlpha(30),
+            ),
+            child: Icon(stateIcon, color: stateColor, size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  stateLabel,
+                  style: TextStyle(
+                    color: stateColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  '🏍️ ${speed.toStringAsFixed(1)} km/h · ⏱ ${mins}ph ${secs}s',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          if (fallDetected)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.red.withAlpha(50),
+              ),
+              child: const Text(
+                'NGÃ',
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

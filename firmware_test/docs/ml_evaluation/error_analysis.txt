@@ -1,0 +1,13 @@
+ERROR ANALYSIS REPORT
+=====================
+
+Dataset: 4 test samples
+Impact ratio: 25.0%
+
+Model: Logistic Regression
+True Positive:  1
+True Negative:  3
+False Positive: 0
+False Negative: 0
+FP Rate: 0.0%
+FN Rate: 0.0%

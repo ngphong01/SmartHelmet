@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../models/telemetry_data.dart';
+import '../utils/app_logger.dart';
+import 'gps_fallback_service.dart';
 
 /// Service UUID & Characteristic UUIDs cho Nordic UART Service
 const String _serviceUuid = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -22,10 +24,76 @@ class BleService extends ChangeNotifier {
   StreamSubscription? _txSubscription;
   String _buffer = ''; // Buffer dữ liệu BLE
 
+  // ============================================================
+  // AUTO-RECONNECT + HEARTBEAT
+  // ============================================================
+  Timer? _reconnectTimer;
+  Timer? _heartbeatTimer;
+  DateTime _lastHeartbeat = DateTime.now();
+  bool _autoReconnect = true;
+  static const _reconnectInterval = Duration(seconds: 5);
+  static const _heartbeatInterval = Duration(seconds: 5);
+  static const _heartbeatTimeout = Duration(seconds: 15);
+
+  // ============================================================
+  // GPS FALLBACK
+  // ============================================================
+  final GpsFallbackService gpsFallback = GpsFallbackService();
+
   // Getters
   BleConnectionState get state => _state;
   TelemetryData? get latestData => _latestData;
   bool get isConnected => _state == BleConnectionState.connected;
+  bool get isHeartbeatAlive =>
+      DateTime.now().difference(_lastHeartbeat) < _heartbeatTimeout;
+  bool get autoReconnect => _autoReconnect;
+  set autoReconnect(bool v) => _autoReconnect = v;
+
+  /// Bật chế độ tự động reconnect
+  void startAutoReconnect() {
+    _autoReconnect = true;
+    _startReconnectTimer();
+    _startHeartbeatMonitor();
+  }
+
+  /// Tắt chế độ tự động reconnect
+  void stopAutoReconnect() {
+    _autoReconnect = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  void _startReconnectTimer() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer.periodic(_reconnectInterval, (_) async {
+      if (!_autoReconnect) return;
+      if (_state == BleConnectionState.disconnected) {
+        logRetry('BLE', 'Auto-reconnect...');
+        incrementReconnect();
+        await connect();
+      }
+    });
+  }
+
+  void _startHeartbeatMonitor() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+      if (_state == BleConnectionState.connected && !isHeartbeatAlive) {
+        logWarn('BLE', 'Heartbeat timeout! Coi nhu mat ket noi');
+        incrementDisconnect();
+        _state = BleConnectionState.disconnected;
+        notifyListeners();
+        // Sẽ được reconnect timer xử lý
+      }
+    });
+  }
+
+  /// Xử lý heartbeat từ dữ liệu telemetry
+  void _updateHeartbeat() {
+    _lastHeartbeat = DateTime.now();
+  }
 
   /// Quét và kết nối tới thiết bị có tên "SmartHelmet"
   Future<bool> connect() async {
@@ -41,11 +109,11 @@ class BleService extends ChangeNotifier {
       BluetoothDevice? found;
 
       // ─── Cách 1: Kiểm tra thiết bị đã paired ──────────────────
-      debugPrint('[BLE] 🔍 Kiểm tra thiết bị đã paired...');
+      logInfo('BLE', '🔍 Kiem tra paired devices...');
       final paired = await FlutterBluePlus.systemDevices([]);
-      debugPrint('[BLE] Có ${paired.length} thiết bị paired');
+      logInfo('BLE', 'Co ${paired.length} thiet bi paired');
       for (final d in paired) {
-        debugPrint('[BLE]   → ${d.platformName} | ${d.remoteId}');
+        logDebug('BLE', '  → ${d.platformName} | ${d.remoteId}');
         try {
           await d.connect(
             autoConnect: false,
@@ -55,7 +123,7 @@ class BleService extends ChangeNotifier {
           for (final srv in d.servicesList) {
             if (srv.uuid.toString().toLowerCase() == _serviceUuid) {
               found = d;
-              debugPrint('[BLE] ✅ Tìm thấy SmartHelmet trong paired!');
+              logOk('BLE', 'Tim thay SmartHelmet trong paired!');
               break;
             }
           }
@@ -70,25 +138,25 @@ class BleService extends ChangeNotifier {
 
       // ─── Cách 2: Scan BLE (không filter UUID vì Android hay lỗi) ─
       if (found == null) {
-        debugPrint('[BLE] 🔍 Bắt đầu scan BLE (không filter)...');
+        logInfo('BLE', '🔍 Bat dau scan BLE...');
         await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
 
         await for (final results in FlutterBluePlus.scanResults) {
-          debugPrint('[BLE] 📡 Tìm thấy ${results.length} thiết bị BLE');
+          logDebug('BLE', '📡 Tim thay ${results.length} thiet bi BLE');
           for (final r in results) {
             final name = (r.device.platformName).toUpperCase();
             final advName = (r.advertisementData.advName ?? '').toUpperCase();
             final mac = r.device.remoteId.toString().toUpperCase();
-            debugPrint(
-              '  → Tên: "$name" | Adv: "$advName" | MAC: $mac | RSSI: ${r.rssi}',
+            logDebug(
+              'BLE',
+              '  → Ten: "$name" | Adv: "$advName" | RSSI: ${r.rssi}',
             );
 
-            // So sánh không phân biệt hoa thường
             if (name.contains('SMARTHELMET') ||
                 advName.contains('SMARTHELMET') ||
                 mac == '80:F3:DA:A9:A8:9A') {
               found = r.device;
-              debugPrint('[BLE] ✅ Tìm thấy SmartHelmet! $name | $mac');
+              logOk('BLE', 'Tim thay SmartHelmet! $name RSSI=${r.rssi}');
               break;
             }
           }
@@ -99,33 +167,32 @@ class BleService extends ChangeNotifier {
       }
 
       if (found == null) {
-        debugPrint('[BLE] ❌ Không tìm thấy SmartHelmet');
+        logFail('BLE', 'Khong tim thay SmartHelmet');
         _state = BleConnectionState.disconnected;
         notifyListeners();
         return false;
       }
 
+      logBleState('scanning', 'connecting');
       _state = BleConnectionState.connecting;
       notifyListeners();
 
       _device = found;
-      // Chỉ connect nếu chưa connect
       try {
         if (_device!.isDisconnected) {
           await _device!.connect(autoConnect: false);
         }
         await _device!.discoverServices();
 
-        // === YÊU CẦU MTU 512 ĐỂ JSON 500 BYTE VỪA 1 GÓI ===
         try {
           final mtu = await _device!.requestMtu(512);
-          debugPrint('[BLE] 📡 MTU negotiated: $mtu bytes');
+          logInfo('BLE', '📡 MTU negotiated: $mtu bytes');
         } catch (e) {
           debugPrint('[BLE] ⚠️ Không thể request MTU 512: $e');
           // Fallback: firmware sẽ tự chunk 180 byte
         }
       } catch (e) {
-        debugPrint('[BLE] Lỗi connect device: $e');
+        logFail('BLE', 'Loi connect: $e');
         try {
           await _device!.disconnect();
         } catch (_) {}
@@ -144,7 +211,7 @@ class BleService extends ChangeNotifier {
       }
 
       if (uartService == null) {
-        debugPrint('[BLE] ❌ Không tìm thấy UART Service');
+        logFail('BLE', 'Khong tim thay UART Service');
         await _device!.disconnect();
         _state = BleConnectionState.disconnected;
         notifyListeners();
@@ -161,7 +228,7 @@ class BleService extends ChangeNotifier {
       }
 
       if (_txChar == null || _rxChar == null) {
-        debugPrint('[BLE] ❌ Không tìm thấy TX/RX characteristic');
+        logFail('BLE', 'Khong tim thay TX/RX characteristic');
         await _device!.disconnect();
         _state = BleConnectionState.disconnected;
         notifyListeners();
@@ -178,10 +245,13 @@ class BleService extends ChangeNotifier {
       _state = BleConnectionState.connected;
       notifyListeners();
 
-      debugPrint('[BLE] ✅ Đã kết nối và bắt đầu nhận dữ liệu!');
+      // Bắt đầu auto-reconnect và heartbeat monitor
+      startAutoReconnect();
+
+      logOk('BLE', 'Da ket noi va bat dau stream du lieu!');
       return true;
     } catch (e) {
-      debugPrint('BLE connect error: $e');
+      logFail('BLE', 'Connect error: $e');
       _state = BleConnectionState.disconnected;
       notifyListeners();
       return false;
@@ -193,9 +263,9 @@ class BleService extends ChangeNotifier {
     if (_rxChar == null) return;
     try {
       await _rxChar!.write(utf8.encode(cmd), withoutResponse: false);
-      debugPrint('[BLE] Gửi: $cmd');
+      logTx('BLE', 'Gui: $cmd');
     } catch (e) {
-      debugPrint('[BLE] Lỗi gửi: $e');
+      logFail('BLE', 'Loi gui $cmd: $e');
     }
   }
 
@@ -215,61 +285,64 @@ class BleService extends ChangeNotifier {
   void _onDataReceived(List<int> data) {
     if (data.isEmpty) return;
 
-    // DEBUG: Log raw data
     final rawStr = String.fromCharCodes(data);
-    debugPrint(
-      '[BLE] 📥 RAW (${data.length}B): ${rawStr.length > 120 ? '${rawStr.substring(0, 120)}...' : rawStr}',
+    logRx(
+      'BLE',
+      'RX ${data.length}B: ${rawStr.length > 80 ? '${rawStr.substring(0, 80)}...' : rawStr}',
     );
 
     try {
       _buffer += utf8.decode(data);
 
-      // Parse JSON theo \n delimiter
       while (true) {
         final nlIdx = _buffer.indexOf('\n');
-        if (nlIdx == -1) break; // Chưa có delimiter → đợi thêm data
+        if (nlIdx == -1) break;
 
         final line = _buffer.substring(0, nlIdx).trim();
         _buffer = _buffer.substring(nlIdx + 1);
 
-        debugPrint(
-          '[BLE] 📋 Line (${line.length} chars): ${line.length > 120 ? '${line.substring(0, 120)}...' : line}',
-        );
-
         if (line.isNotEmpty && line.startsWith('{')) {
           _tryParseJson(line);
-        } else if (line.isNotEmpty) {
-          debugPrint(
-            '[BLE] ⚠️ Line không phải JSON, skip: "${line.length > 50 ? '${line.substring(0, 50)}...' : line}"',
-          );
         }
       }
 
-      // Giới hạn buffer tránh memory leak nếu data lỗi
       if (_buffer.length > 8192) {
-        debugPrint('[BLE] ⚠️ Buffer quá dài (${_buffer.length}), reset');
+        logWarn('BLE', 'Buffer qua dai (${_buffer.length}B), reset');
         _buffer = '';
       }
     } catch (e) {
-      debugPrint('[BLE] ❌ Lỗi decode buffer: $e');
+      logFail('BLE', 'Loi decode buffer: $e');
+      incrementParseError();
       _buffer = '';
     }
   }
 
   void _tryParseJson(String json) {
     try {
+      startTimer('parse_json');
       _latestData = TelemetryData.fromJson(json);
+      final parseMs = stopTimer('parse_json');
+      _updateHeartbeat();
+      incrementTelemetry();
       notifyListeners();
-      debugPrint(
-        '[BLE] OK: ${json.length > 80 ? '${json.substring(0, 80)}...' : json}',
+      logDebug(
+        'BLE',
+        'OK: peak_g=${_latestData?.impact?.peakG.toStringAsFixed(2) ?? "?"} ai_p=${_latestData?.impact?.aiP.toStringAsFixed(3) ?? "?"} (${parseMs.toStringAsFixed(1)}ms)',
       );
     } catch (e) {
-      debugPrint('[BLE] Lỗi parse JSON: $e\n  Data: ${json.substring(0, 100)}');
+      incrementParseError();
+      logFail('BLE', 'Parse JSON loi: $e');
+      logDebug(
+        'BLE',
+        'Raw: ${json.length > 100 ? '${json.substring(0, 100)}...' : json}',
+      );
     }
   }
 
   /// Ngắt kết nối
   Future<void> disconnect() async {
+    stopAutoReconnect();
+    gpsFallback.dispose();
     await sendStop();
     await _txSubscription?.cancel();
     _txSubscription = null;
@@ -288,6 +361,8 @@ class BleService extends ChangeNotifier {
 
   @override
   void dispose() {
+    stopAutoReconnect();
+    gpsFallback.dispose();
     disconnect();
     super.dispose();
   }

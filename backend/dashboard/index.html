@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartHelmet Dashboard</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Segoe UI", system-ui;
+        background: #0f172a;
+        color: #e2e8f0;
+        overflow: hidden;
+      }
+      #app {
+        display: flex;
+        height: 100vh;
+      }
+      /* sidebar */
+      #sidebar {
+        width: 380px;
+        background: #1e293b;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid #334155;
+      }
+      #sidebar-header {
+        background: linear-gradient(135deg, #1e40af, #3b82f6);
+        padding: 20px;
+        text-align: center;
+      }
+      #sidebar-header h1 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 1px;
+      }
+      #sidebar-header .sub {
+        font-size: 12px;
+        color: #bfdbfe;
+        margin-top: 4px;
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        margin-top: 8px;
+      }
+      .status-badge.online {
+        background: #065f46;
+        color: #6ee7b7;
+      }
+      .status-badge.offline {
+        background: #7f1d1d;
+        color: #fca5a5;
+      }
+      .status-badge.impact {
+        background: #991b1b;
+        color: #fecaca;
+        animation: pulse 0.5s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      /* info cards */
+      #info-cards {
+        padding: 16px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        overflow-y: auto;
+      }
+      .card {
+        background: #0f172a;
+        border-radius: 14px;
+        padding: 14px;
+        border: 1px solid #334155;
+      }
+      .card .label {
+        font-size: 11px;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .card .value {
+        font-size: 24px;
+        font-weight: 800;
+        margin-top: 4px;
+      }
+      .card .value.speed {
+        color: #38bdf8;
+      }
+      .card .value.peak {
+        color: #f59e0b;
+      }
+      .card .value.ai {
+        color: #a78bfa;
+      }
+      .card .value.sats {
+        color: #34d399;
+      }
+      /* alerts log */
+      #alerts {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 16px 16px;
+      }
+      #alerts h3 {
+        font-size: 13px;
+        color: #94a3b8;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .alert-item {
+        background: #0f172a;
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 6px;
+        border-left: 3px solid #ef4444;
+        font-size: 13px;
+      }
+      .alert-item.impact {
+        border-color: #ef4444;
+      }
+      .alert-item.fall {
+        border-color: #f97316;
+      }
+      .alert-item .time {
+        color: #64748b;
+        font-size: 11px;
+      }
+      /* map */
+      #map-container {
+        flex: 1;
+        position: relative;
+      }
+      #map {
+        width: 100%;
+        height: 100%;
+      }
+      /* path line */
+      .route-line {
+        stroke: #3b82f6;
+        stroke-width: 3;
+        stroke-opacity: 0.8;
+        fill: none;
+      }
+      /* marker pulse */
+      .marker-pulse {
+        animation: markerPulse 1.2s ease-out infinite;
+      }
+      @keyframes markerPulse {
+        0% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(3);
+          opacity: 0;
+        }
+      }
+      /* multi-helmet */
+      #helmet-select {
+        background: #0f172a;
+        border: 1px solid #334155;
+        color: #e2e8f0;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        margin: 8px 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="sidebar">
+        <div id="sidebar-header">
+          <h1>🪖 SmartHelmet</h1>
+          <div class="sub">Hệ thống giám sát thời gian thực</div>
+          <div id="statusBadge" class="status-badge offline">⚫ Offline</div>
+        </div>
+        <select id="helmet-select">
+          <option value="all">Tất cả mũ</option>
+        </select>
+        <div id="info-cards">
+          <div class="card">
+            <div class="label">🏍️ Tốc độ</div>
+            <div id="speedVal" class="value speed">--</div>
+          </div>
+          <div class="card">
+            <div class="label">⚡ Peak G</div>
+            <div id="peakVal" class="value peak">--</div>
+          </div>
+          <div class="card">
+            <div class="label">🧠 AI Xác suất</div>
+            <div id="aiVal" class="value ai">--</div>
+          </div>
+          <div class="card">
+            <div class="label">🛰️ Vệ tinh</div>
+            <div id="satsVal" class="value sats">--</div>
+          </div>
+          <div class="card">
+            <div class="label">📐 Pitch</div>
+            <div id="pitchVal" class="value" style="color: #f472b6">--</div>
+          </div>
+          <div class="card">
+            <div class="label">📐 Roll</div>
+            <div id="rollVal" class="value" style="color: #c084fc">--</div>
+          </div>
+          <div class="card">
+            <div class="label">🔄 Angular Vel</div>
+            <div id="angVel" class="value" style="color: #fbbf24">--</div>
+          </div>
+          <div class="card">
+            <div class="label">📡 GPS Source</div>
+            <div id="gpsSrc" class="value" style="font-size: 16px">--</div>
+          </div>
+        </div>
+        <div id="alerts">
+          <h3>⚠️ Cảnh báo gần đây</h3>
+          <div id="alertsList"></div>
+        </div>
+      </div>
+      <div id="map-container"><div id="map"></div></div>
+    </div>
+
+    <script>
+      const BACKEND_URL = window.location.origin;
+      const socket = io(BACKEND_URL);
+
+      // ==================== MAP ====================
+      const map = L.map("map").setView([10.8231, 106.6297], 14);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap",
+        maxZoom: 19,
+      }).addTo(map);
+
+      let helmetMarker = null;
+      let routePath = L.polyline([], { className: "route-line" }).addTo(map);
+      const routePoints = [];
+      const MAX_ROUTE = 200;
+
+      // ==================== SOCKET.IO ====================
+      socket.on("connect", () => {
+        document.getElementById("statusBadge").textContent = "🟢 Online";
+        document.getElementById("statusBadge").className =
+          "status-badge online";
+      });
+
+      socket.on("disconnect", () => {
+        document.getElementById("statusBadge").textContent = "⚫ Offline";
+        document.getElementById("statusBadge").className =
+          "status-badge offline";
+      });
+
+      socket.on("telemetry", (data) => {
+        updateUI(data);
+      });
+
+      socket.on("impact_alert", (data) => {
+        document.getElementById("statusBadge").textContent = "🚨 IMPACT!";
+        document.getElementById("statusBadge").className =
+          "status-badge impact";
+        addAlert(data, data.event_type === "fall_detected" ? "fall" : "impact");
+        setTimeout(() => {
+          document.getElementById("statusBadge").textContent = "🟢 Online";
+          document.getElementById("statusBadge").className =
+            "status-badge online";
+        }, 5000);
+      });
+
+      // ==================== UI UPDATE ====================
+      function updateUI(data) {
+        const gps = data.gps || {};
+        const impact = data.impact || {};
+        const imu = data.imu || {};
+        const state = data.state || {};
+
+        document.getElementById("speedVal").textContent = gps.speed_kmh
+          ? `${gps.speed_kmh.toFixed(1)} km/h`
+          : "--";
+        document.getElementById("peakVal").textContent = impact.peak_g
+          ? `${impact.peak_g.toFixed(2)} g`
+          : "--";
+        document.getElementById("aiVal").textContent = impact.ai_p
+          ? `${(impact.ai_p * 100).toFixed(1)}%`
+          : "--";
+        document.getElementById("satsVal").textContent = gps.satellites
+          ? `${gps.satellites} 🛰️`
+          : "--";
+        document.getElementById("pitchVal").textContent = imu.pitch_deg
+          ? `${imu.pitch_deg.toFixed(1)}°`
+          : "--";
+        document.getElementById("rollVal").textContent = imu.roll_deg
+          ? `${imu.roll_deg.toFixed(1)}°`
+          : "--";
+        document.getElementById("angVel").textContent = imu.angular_vel_dps
+          ? `${imu.angular_vel_dps.toFixed(0)} °/s`
+          : "--";
+
+        const gpsSrc = gps.source || "neo6m";
+        const srcIcon =
+          gpsSrc === "neo6m" ? "🛰️" : gpsSrc === "cache" ? "📦" : "📱";
+        document.getElementById("gpsSrc").textContent =
+          `${srcIcon} ${gpsSrc.toUpperCase()}`;
+
+        // Update marker position
+        if (gps.lat && gps.lon && (gps.lat !== 0 || gps.lon !== 0)) {
+          const latLng = [gps.lat, gps.lon];
+          if (!helmetMarker) {
+            helmetMarker = L.marker(latLng, {
+              icon: L.divIcon({
+                html: "🪖",
+                className: "marker-pulse",
+                iconSize: [28, 28],
+              }),
+            }).addTo(map);
+          }
+          helmetMarker.setLatLng(latLng);
+          routePoints.push(latLng);
+          if (routePoints.length > MAX_ROUTE) routePoints.shift();
+          routePath.setLatLngs(routePoints);
+          map.panTo(latLng, { animate: true, duration: 0.5 });
+        }
+
+        // Multi-helmet
+        const helmetId = data.helmet_id || "H001";
+        const select = document.getElementById("helmet-select");
+        if (!select.querySelector(`option[value="${helmetId}"]`)) {
+          const opt = document.createElement("option");
+          opt.value = helmetId;
+          opt.textContent = `🪖 ${helmetId}`;
+          select.appendChild(opt);
+        }
+      }
+
+      function addAlert(data, type) {
+        const list = document.getElementById("alertsList");
+        const div = document.createElement("div");
+        div.className = `alert-item ${type}`;
+        const now = new Date();
+        div.innerHTML = `
+    <div style="font-weight:700">${type === "fall" ? "🛑 NGA XE" : "🚨 VA CHẠM"} — ${data.helmet_id || "H001"}</div>
+    <div>AI: ${((data.ai_p || 0) * 100).toFixed(1)}% | Peak: ${(data.peak_g || 0).toFixed(2)}g</div>
+    ${data.event_type === "fall_detected" ? '<div style="color:#f97316">Góc nghiêng vượt ngưỡng — có thể đã ngã!</div>' : ""}
+    <div class="time">${now.toLocaleTimeString("vi-VN")}</div>
+  `;
+        list.insertBefore(div, list.firstChild);
+        if (list.children.length > 20) list.lastChild.remove();
+      }
+    </script>
+  </body>
+</html>
