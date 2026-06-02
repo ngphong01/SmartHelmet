@@ -628,20 +628,6 @@ Chi tiết tại [TESTING.md](TESTING.md). Tóm tắt:
 
 ---
 
-## 📚 Công nghệ sử dụng
-
-| Tầng           | Công nghệ                                                                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
-| **Phần cứng**  | ESP32, MPU6050, GPS NEO-6M, BLE 4.0                                                                                                        |
-| **Firmware**   | C++ (Arduino), PlatformIO, NimBLE, ArduinoFFT, Preferences (NVS)                                                                           |
-| **Mobile App** | Flutter 3.x, flutter_blue_plus, flutter_map, flutter_foreground_task, wakelock_plus, geolocator, fl_chart, flutter_tts, shared_preferences |
-| **Backend**    | Node.js, Express 5, MongoDB, Mongoose, Socket.io                                                                                           |
-| **Dashboard**  | HTML5, Leaflet.js, Socket.IO Client (CDN)                                                                                                  |
-| **ML/Data**    | Python, NumPy, SciPy, scikit-learn, seaborn, matplotlib                                                                                    |
-| **Giao tiếp**  | BLE Nordic UART, WiFi/HTTP, Telegram Bot API                                                                                               |
-| **Log System** | ESP32: LOG_OK/ERR/WARN/INFO/DBG + stats                                                                                                    | Flutter: app_logger.dart + file export |
-
----
 
 ## 📖 Tài liệu tham khảo
 
@@ -656,7 +642,7 @@ Chi tiết tại [TESTING.md](TESTING.md). Tóm tắt:
 
 ---
 
-## � Hệ thống Log
+##  Hệ thống Log
 
 ### ESP32 Firmware
 
