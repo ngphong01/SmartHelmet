@@ -5,6 +5,7 @@ Hệ thống mũ bảo hiểm tích hợp AI phát hiện va chạm & ngã xe, t
 ## 🎯 Mục đích
 
 Phát hiện tai nạn giao thông theo thời gian thực và tự động gửi cảnh báo khẩn cấp đến:
+
 - **Telegram** — tin nhắn tức thời qua WiFi
 - **Flutter App** — gọi điện + voice TTS qua BLE
 - **BLE Mesh** — broadcast cho các mũ lân cận
@@ -83,12 +84,12 @@ firmware_test/
 
 ## 🔧 Phần cứng
 
-| Module | Model | Kết nối |
-|--------|-------|---------|
-| MCU | ESP32 Dev Module | — |
-| IMU | MPU6500 | I2C (SDA=21, SCL=22) |
-| GPS | GY-NEO6MV2 | UART2 (RX=16, TX=17) |
-| Buzzer | Active buzzer | GPIO |
+| Module | Model            | Kết nối              |
+| ------ | ---------------- | -------------------- |
+| MCU    | ESP32 Dev Module | —                    |
+| IMU    | MPU6500          | I2C (SDA=21, SCL=22) |
+| GPS    | GY-NEO6MV2       | UART2 (RX=16, TX=17) |
+| Buzzer | Active buzzer    | GPIO                 |
 
 ## 🚀 Cài đặt & Build
 
@@ -121,14 +122,14 @@ flutter run
 
 ### Ngưỡng phát hiện (config.h + fall_detector.h)
 
-| Tham số | Mặc định | Mô tả |
-|---------|----------|-------|
-| `IMPACT_THRESH` | 0.85 | Ngưỡng xác suất AI |
-| `PEAK_G_MIN` | 2.0g | Gia tốc tối thiểu |
-| `BRUTE_FORCE_G_MIN` | 5.0g | Bypass AI |
-| `FALL_TILT_THRESHOLD_DEG` | 55° | Góc nghiêng ngã |
-| `FALL_GYRO_THRESHOLD_DPS` | 120°/s | Vận tốc góc ngã |
-| `IMPACT_DEBOUNCE_MS` | 5000 | Debounce va chạm |
+| Tham số                   | Mặc định | Mô tả              |
+| ------------------------- | -------- | ------------------ |
+| `IMPACT_THRESH`           | 0.85     | Ngưỡng xác suất AI |
+| `PEAK_G_MIN`              | 2.0g     | Gia tốc tối thiểu  |
+| `BRUTE_FORCE_G_MIN`       | 5.0g     | Bypass AI          |
+| `FALL_TILT_THRESHOLD_DEG` | 55°      | Góc nghiêng ngã    |
+| `FALL_GYRO_THRESHOLD_DPS` | 120°/s   | Vận tốc góc ngã    |
+| `IMPACT_DEBOUNCE_MS`      | 5000     | Debounce va chạm   |
 
 ### WiFi & Telegram (include/secrets.h)
 
@@ -155,6 +156,7 @@ flutter run
 ## 🔮 Hướng tương lai (Roadmap)
 
 ### ✅ Đã hoàn thành
+
 - [x] AI phát hiện va chạm (Logistic Regression + FFT)
 - [x] Phát hiện ngã xe (tilt + gyro)
 - [x] GPS Selector — luân phiên NEO-6M & Phone GPS
@@ -166,12 +168,14 @@ flutter run
 - [x] Impact buffer + retry (NVS persistence)
 
 ### 🚧 Đang phát triển
+
 - [ ] **Voice TTS tiếng Việt** — hoàn thiện engine, thêm fallback
 - [ ] **App Flutter background service** — nhận alert cả khi app bị kill
 - [ ] **SIM800L SMS** — gửi SMS trực tiếp từ ESP32 khi không có WiFi
 - [ ] **OTA firmware update** — cập nhật firmware từ xa qua WiFi/BLE
 
 ### 📋 Kế hoạch
+
 - [ ] **Multi-helmet mesh network** — các mũ gần nhau tự động chuyển tiếp cảnh báo
 - [ ] **Cloud dashboard** — theo dõi realtime vị trí + trạng thái tất cả mũ
 - [ ] **AI model tuning** — fine-tune model với dữ liệu thực tế từ người dùng
@@ -186,6 +190,7 @@ flutter run
 ## 🧪 Test
 
 Đập nhẹ vào mũ để test:
+
 1. ESP32 phát hiện va chạm/ngã → gửi Telegram + BLE
 2. Flutter app hiện màn hình đếm ngược 30s
 3. Hết 30s → tự động gọi điện + voice TTS
