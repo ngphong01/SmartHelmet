@@ -2,6 +2,8 @@
 
 Hệ thống mũ bảo hiểm tích hợp AI phát hiện va chạm & ngã xe, tự động gọi cứu hộ qua Flutter app.
 
+> **Sinh viên thực hiện:** ĐÀO VĂN PHONG
+
 ## 🎯 Mục đích
 
 Phát hiện tai nạn giao thông theo thời gian thực và tự động gửi cảnh báo khẩn cấp đến:

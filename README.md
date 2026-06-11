@@ -199,3 +199,6 @@ flutter run
 ## 📝 License
 
 MIT
+
+---
+*Sinh viên thực hiện: ĐÀO VĂN PHONG*
