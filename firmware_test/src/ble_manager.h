@@ -35,9 +35,10 @@ struct BlePhoneInfo
 {
     uint16_t connHandle;
     BleConnState state;
-    uint32_t lastHeartbeatMs;  // lần cuối nhận heartbeat response
-    uint32_t connectedSinceMs; // thời điểm kết nối
-    bool isPrimary;            // phone chính hay dự phòng
+    uint32_t lastHeartbeatMs;    // lần cuối nhận heartbeat response
+    uint32_t connectedSinceMs;   // thời điểm kết nối
+    bool isPrimary;              // phone chính hay dự phòng
+    bool heartbeatTimeoutLogged; // đã log timeout (tránh spam serial)
 };
 
 struct BleConnectionStats

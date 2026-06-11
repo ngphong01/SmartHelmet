@@ -1,12 +1,13 @@
-    /*
-    #pragma once
-    #include <Arduino.h>
+#pragma once
+#include <Arduino.h>
 
-    void logger_begin();   // gọi trong setup (đặt mốc thời gian)
-    void logger_loop();    // gọi mỗi vòng loop
+// ============================================================
+// LEGACY LOGGER - Đã được thay thế bởi log_system.h
+// Giữ lại để tương thích ngược, gọi xuống log_system
+// ============================================================
 
-    // Các lệnh từ BLE
-    void logger_start();
-    void logger_stop();
-    void logger_set_marker(uint8_t marker);
-    */
+void logger_begin();
+void logger_loop();
+void logger_start();
+void logger_stop();
+void logger_set_marker(uint8_t marker);

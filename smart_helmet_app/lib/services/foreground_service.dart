@@ -55,7 +55,8 @@ class ForegroundService {
   /// Dừng foreground service
   static Future<bool> stop() async {
     await WakelockPlus.disable();
-    return await FlutterForegroundTask.stopService();
+    final result = await FlutterForegroundTask.stopService();
+    return result is ServiceRequestSuccess;
   }
 
   /// Kiểm tra service đang chạy không
@@ -73,20 +74,16 @@ class ForegroundService {
 /// Task handler cho foreground service
 class _TaskHandler extends TaskHandler {
   @override
-  Future<void> onStart(
-    DateTime timestamp,
-    TaskStoppedCallback? onStopped,
-  ) async {
-    debugPrint('[Foreground] Service started at $timestamp');
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    debugPrint(
+      '[Foreground] Service started at $timestamp (starter: ${starter.name})',
+    );
   }
 
   @override
-  Future<void> onRepeatEvent(
-    DateTime timestamp,
-    TaskStoppedCallback? onStopped,
-  ) async {
+  void onRepeatEvent(DateTime timestamp) {
     // Cập nhật notification text mỗi 5s
-    await FlutterForegroundTask.updateService(
+    FlutterForegroundTask.updateService(
       notificationTitle: '🪖 Mũ Bảo Hiểm Thông Minh',
       notificationText:
           'Đang hoạt động — ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
@@ -94,10 +91,7 @@ class _TaskHandler extends TaskHandler {
   }
 
   @override
-  Future<void> onDestroy(
-    DateTime timestamp,
-    TaskStoppedCallback? onStopped,
-  ) async {
+  Future<void> onDestroy(DateTime timestamp) async {
     debugPrint('[Foreground] Service destroyed at $timestamp');
   }
 

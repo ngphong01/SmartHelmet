@@ -1,0 +1,391 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'services/ble_service.dart';
+import 'screens/fall_alert_screen.dart';
+
+// ──────────────────────────────────────────────────
+// CẤU HÌNH
+// ──────────────────────────────────────────────────
+const String TARGET_DEVICE_NAME = 'SmartHelmet';
+const String UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const String UART_CHAR_NOTIFY_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const String UART_CHAR_WRITE_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+// Số điện thoại khẩn cấp (khớp với firmware secrets.h)
+const String EMERGENCY_PHONE = '0868314386';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const SmartHelmetApp());
+}
+
+class SmartHelmetApp extends StatelessWidget {
+  const SmartHelmetApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Smart Helmet',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1A237E),
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      home: const HelmetHomeScreen(),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────
+// MÀN HÌNH CHÍNH
+// ──────────────────────────────────────────────────
+class HelmetHomeScreen extends StatefulWidget {
+  const HelmetHomeScreen({super.key});
+
+  @override
+  State<HelmetHomeScreen> createState() => _HelmetHomeScreenState();
+}
+
+class _HelmetHomeScreenState extends State<HelmetHomeScreen>
+    with WidgetsBindingObserver {
+  final BleService _bleService = BleService();
+
+  // Trạng thái
+  bool _isConnected = false;
+  String _rideState = 'IDLE';
+  bool _fallDetected = false;
+  double _pitch = 0;
+  double _roll = 0;
+  double _latitude = 0;
+  double _longitude = 0;
+  double _speedKmh = 0;
+  int _satellites = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _initBle();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _bleService.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _bleService.startScanning();
+    }
+  }
+
+  Future<void> _initBle() async {
+    _bleService.onConnected = () {
+      setState(() => _isConnected = true);
+    };
+
+    _bleService.onDisconnected = () {
+      setState(() {
+        _isConnected = false;
+        _rideState = 'IDLE';
+      });
+    };
+
+    _bleService.onTelemetry = (data) {
+      setState(() {
+        _rideState = data['ride_state'] ?? 'IDLE';
+        _fallDetected = data['fall_detected'] == 'true';
+        _pitch = double.tryParse(data['pitch_deg']?.toString() ?? '0') ?? 0;
+        _roll = double.tryParse(data['roll_deg']?.toString() ?? '0') ?? 0;
+        _latitude = double.tryParse(data['lat']?.toString() ?? '0') ?? 0;
+        _longitude = double.tryParse(data['lon']?.toString() ?? '0') ?? 0;
+        _speedKmh = double.tryParse(data['speed_kmh']?.toString() ?? '0') ?? 0;
+        _satellites = int.tryParse(data['satellites']?.toString() ?? '0') ?? 0;
+      });
+    };
+
+    // 🔴 KHI PHÁT HIỆN NGÃ → HIỆN MÀN HÌNH CẢNH BÁO
+    _bleService.onFallDetected = (data) {
+      _showFallAlertScreen(data);
+    };
+
+    await _bleService.init();
+  }
+
+  void _showFallAlertScreen(Map<String, dynamic> data) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => FallAlertScreen(
+          latitude: _latitude,
+          longitude: _longitude,
+          peakG: double.tryParse(data['peak_g']?.toString() ?? '0') ?? 0,
+          aiProbability: double.tryParse(data['ai_p']?.toString() ?? '0') ?? 0,
+          emergencyPhone: EMERGENCY_PHONE,
+          onAck: () {
+            // Gửi ACK về ESP32
+            _bleService.sendCommand('ACK');
+            Navigator.of(context).pop();
+          },
+          onSos: () {
+            _bleService.sendCommand('SOS');
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D1117),
+      appBar: AppBar(
+        title: const Text('🪖 Smart Helmet'),
+        backgroundColor: const Color(0xFF161B22),
+        actions: [
+          // Nút SOS thủ công
+          if (_isConnected)
+            IconButton(
+              icon: const Icon(Icons.emergency, color: Colors.red, size: 32),
+              onPressed: () {
+                _bleService.sendCommand('SOS');
+                _showFallAlertScreen({});
+              },
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // ─── TRẠNG THÁI KẾT NỐI ───
+          _buildConnectionStatus(),
+
+          // ─── THÔNG TIN GPS ───
+          _buildGpsCard(),
+
+          // ─── GÓC NGHIÊNG ───
+          _buildImuCard(),
+
+          // ─── TRẠNG THÁI DI CHUYỂN ───
+          _buildRideStateCard(),
+
+          const Spacer(),
+
+          // ─── NÚT TEST ───
+          if (_isConnected)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _bleService.sendCommand('START'),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Stream'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _bleService.sendCommand('STOP'),
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Dừng'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionStatus() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _isConnected
+            ? Colors.green.withAlpha(30)
+            : Colors.red.withAlpha(30),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isConnected ? Colors.green : Colors.red,
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _isConnected ? Colors.green : Colors.red,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            _isConnected ? '🟢 ĐÃ KẾT NỐI' : '🔴 ĐANG TÌM MŨ...',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: _isConnected ? Colors.green : Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGpsCard() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      color: const Color(0xFF161B22),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.gps_fixed, color: Colors.blue, size: 20),
+                const SizedBox(width: 8),
+                const Text('GPS',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Text(
+                  '🛰 $satellites vệ tinh',
+                  style: const TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _latitude != 0
+                  ? '📍 ${_latitude.toStringAsFixed(6)}, ${_longitude.toStringAsFixed(6)}'
+                  : '⏳ Đang tìm tín hiệu GPS...',
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            Text(
+              '🏍 ${_speedKmh.toStringAsFixed(1)} km/h',
+              style: const TextStyle(color: Colors.orange),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImuCard() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      color: const Color(0xFF161B22),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.sensors, color: Colors.purple, size: 20),
+                SizedBox(width: 8),
+                Text('CẢM BIẾN GÓC NGHIÊNG',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildAngleGauge('Pitch\n(trước/sau)', _pitch, Colors.cyan),
+                _buildAngleGauge('Roll\n(trái/phải)', _roll, Colors.orange),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAngleGauge(String label, double angle, Color color) {
+    double normalized = (angle / 90).clamp(-1, 1);
+    return Column(
+      children: [
+        Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: color.withAlpha(100), width: 3),
+          ),
+          child: Transform.rotate(
+            angle: normalized * 3.14 / 2,
+            child: Icon(Icons.navigation, color: color, size: 32),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text('${angle.toStringAsFixed(1)}°',
+            style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+        Text(label,
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+            textAlign: TextAlign.center),
+      ],
+    );
+  }
+
+  Widget _buildRideStateCard() {
+    IconData icon;
+    Color color;
+    switch (_rideState) {
+      case 'RIDING':
+        icon = Icons.directions_bike;
+        color = Colors.green;
+        break;
+      case 'IMPACT':
+        icon = Icons.warning_amber;
+        color = Colors.orange;
+        break;
+      case 'FALLEN':
+        icon = Icons.emergency;
+        color = Colors.red;
+        break;
+      case 'SOS':
+        icon = Icons.sos;
+        color = Colors.red;
+        break;
+      default:
+        icon = Icons.pause_circle;
+        color = Colors.grey;
+    }
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      color: const Color(0xFF161B22),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(width: 12),
+            Text(
+              _rideState,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

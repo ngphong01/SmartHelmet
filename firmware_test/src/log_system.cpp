@@ -80,7 +80,7 @@ void printBootInfo()
 void printConfigInfo()
 {
     LOG_INFO("CONFIG", "Sample rate: 1000 Hz, FFT size: 512, Overlap: 50%%");
-    LOG_INFO("CONFIG", "Impact: p>0.97, peak_g>2.8g, confirm=2 windows, debounce=5s");
+    LOG_INFO("CONFIG", "Impact: p>0.85, peak_g>2.0g, confirm=1 window, debounce=5s");
     LOG_INFO("CONFIG", "Fall: tilt>55 deg, gyro>120 dps, hold=1.5s");
     LOG_INFO("CONFIG", "Ride: auto-detect >8 km/h, idle timeout=300s");
     LOG_INFO("CONFIG", "BLE: 2 phones max, heartbeat 5s, MTU 185");
@@ -100,7 +100,7 @@ void printStatsSummary(uint32_t uptimeS, uint32_t freeHeap,
                        uint32_t impactCount, uint32_t fallCount,
                        uint32_t sosCount, uint32_t falsePosCount)
 {
-    uint32_t now = millis();
+    unsigned long now = millis();
     LOG_RAW("\n[%08lu][STATS] ======= He thong (%lu s) =======\n", now, (unsigned long)uptimeS);
     LOG_RAW("[%08lu][STATS] Heap: %lu KB free | Log: %s\n",
             now, (unsigned long)(freeHeap / 1024),

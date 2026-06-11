@@ -7,5 +7,8 @@
 #define TELEMETRY_INTERVAL_MS 3000
 
 // ===== Telegram Bot =====
-#define TELEGRAM_BOT_TOKEN "7607204109:AAG1Edomq7XxwjhUrJWABsaUqWlxqKkSLS8"
-#define TELEGRAM_CHAT_ID "6722014481"
+#define TELEGRAM_BOT_TOKEN "8998211373:AAHuxewjCzEmA9MFZlOBlCDygkwxxw7c-E0"
+#define TELEGRAM_CHAT_ID "1934281815"
+
+// ===== Số điện thoại khẩn cấp (app Flutter sẽ dùng để gọi) =====
+#define EMERGENCY_PHONE "0868314386"

@@ -14,9 +14,11 @@
 #include "secrets.h"
 
 // === GIẢI PHÁP MỚI (GP1-5) ===
-#include "impact_buffer.h" // GP1: Buffer + Retry
-#include "wifi_manager.h"  // GP4: WiFi đa SSID
-#include "ble_mesh.h"      // GP5: BLE Mesh broadcast
+#include "impact_buffer.h"        // GP1: Buffer + Retry
+#include "wifi_manager.h"         // GP4: WiFi đa SSID
+#include "ble_mesh.h"             // GP5: BLE Mesh broadcast
+#include "gps_selector.h"         // GP6: GPS Selector - luân phiên NEO-6M & Phone
+#include "ble_emergency_beacon.h" // GP7: BLE Emergency Beacon - phát SOS không cần ghép đôi
 
 // === TÍNH NĂNG NÂNG CAO (NHÓM 2) ===
 #include "fall_detector.h" // 2.1: Phát hiện ngã (pitch/roll/gyro)
@@ -35,16 +37,15 @@ static const bool TEST_MODE = false;
 // Số mẫu cho FFT (phải KHỚP với N_FFT trong fft_features.cpp)
 static const int WIN_N = 512;
 // STEP = WIN_N/2 = 256 được dùng trong run_detection_window (trượt cửa sổ HALF)
-static const float ACCEL_SENS = ACCEL_SENS_4G; // từ config.h (8192.0f)
+static const float ACCEL_SENS = ACCEL_SENS_16G; // từ config.h (2048.0f cho ±16g)
 
-// Ngưỡng xác suất để coi là impact
-static const float IMPACT_THRESH = TEST_MODE ? 0.25f : 0.97f;
-
-static const float PEAK_G_MIN = TEST_MODE ? 0.8f : 2.8f;
-
-// Thời gian chống dính (debounce) cho impact, ms
+// Ngưỡng phát hiện va chạm
+static const float IMPACT_THRESH = 0.85f;    // AI probability threshold
+static const float PEAK_G_MIN = 2.0f;        // G-peak tối thiểu để AI xem xét
+static const float BRUTE_FORCE_G_MIN = 5.0f; // G-peak > mức này → bypass AI, kích hoạt luôn!
+static const uint8_t IMPACT_CONFIRM_WINDOWS = 1;
 static const uint32_t IMPACT_DEBOUNCE_MS = 5000;
-static const uint8_t IMPACT_CONFIRM_WINDOWS = TEST_MODE ? 1 : 2;
+
 static const uint32_t DEBUG_PRINT_PERIOD_MS = 2000;
 static const uint32_t GPS_PRINT_PERIOD_MS = 5000;
 
@@ -83,6 +84,8 @@ static uint32_t gImpactCount = 0;
 static uint32_t gFallCount = 0;
 static uint32_t gSosCount = 0;
 static uint32_t gFalsePosCount = 0;
+static bool gFallHandled = false; // chặn cascade từ cả impact & fall detector
+static uint32_t gFallCooldownStartMs = 0;
 static uint32_t lastStatsPrintMs = 0;
 static const uint32_t STATS_PERIOD_MS = 60000; // 60 giây
 
@@ -107,20 +110,24 @@ static void sampleImuAndUpdateBuffer()
     float az_g = az_raw / ACCEL_SENS;
 
     float gmag = sqrtf(ax_g * ax_g + ay_g * ay_g + az_g * az_g);
-    if (!isfinite(gmag) || gmag < 0.3f || gmag > 5.0f)
+    // Lọc nhiễu: < 0.3g là noise. Clamp tại 16g (max của ±16g scale) thay vì discard
+    if (!isfinite(gmag) || gmag < 0.3f)
     {
         return;
+    }
+    if (gmag > 16.0f)
+    {
+        gmag = 16.0f;
     }
 
     last_ax_g = ax_g;
     last_ay_g = ay_g;
     last_az_g = az_g;
 
-    // Scale gyro về dps (±500 dps full-scale → 65.5 LSB/dps)
-    const float GYRO_SENS = 65.5f;
-    last_gx_dps = gx_raw / GYRO_SENS;
-    last_gy_dps = gy_raw / GYRO_SENS;
-    last_gz_dps = gz_raw / GYRO_SENS;
+    // Scale gyro về dps (±500 dps full-scale → 65.5 LSB/dps, dùng hằng từ config.h)
+    last_gx_dps = gx_raw / GYRO_SENS_500;
+    last_gy_dps = gy_raw / GYRO_SENS_500;
+    last_gz_dps = gz_raw / GYRO_SENS_500;
 
     // Cập nhật fall detector với dữ liệu IMU đầy đủ
     fall_detector_update(ax_g, ay_g, az_g, last_gx_dps, last_gy_dps, last_gz_dps);
@@ -142,6 +149,8 @@ static void updateGpsSnapshot()
         // Cập nhật GPS cache + ride state machine
         gps_cache_update(fix.lat, fix.lon, fix.speedKmh, fix.hdop, fix.satellites);
         ride_state_update_gps(fix.speedKmh, true);
+        // Cập nhật GPS Selector → để luân phiên với Phone GPS
+        gps_selector_update_neo6m(fix.lat, fix.lon, fix.speedKmh, fix.satellites, fix.hdop);
     }
     else
     {
@@ -215,15 +224,15 @@ static void run_detection_window()
     uint32_t nowMs = millis();
     bool inCooldown = (nowMs - lastImpactMs) < IMPACT_DEBOUNCE_MS;
 
-    // ===== 4) Quyết định impact_flag (có gate bởi ride state) =====
-    int impact_flag = 0;
-    int fall_flag = 0;
-    const char *event_type = "none";
+    // ===== 4) Quyết định impact (có gate bởi ride state) =====
 
     // Chỉ chạy detection khi đang RIDING (hoặc IDLE - dự phòng)
     bool should_detect = ride_state_should_detect();
 
-    bool impact_candidate = should_detect && strong_motion && (p > IMPACT_THRESH);
+    // ===== BRUTE-FORCE: G-peak quá lớn → bypass AI, kích hoạt ngay =====
+    bool brute_force = (g_peak > BRUTE_FORCE_G_MIN);
+
+    bool impact_candidate = should_detect && (brute_force || (strong_motion && (p > IMPACT_THRESH)));
     if (impact_candidate)
     {
         if (impactCandidateCount < IMPACT_CONFIRM_WINDOWS)
@@ -271,12 +280,19 @@ static void run_detection_window()
                     (unsigned long)IMPACT_DEBOUNCE_MS,
                     (unsigned long)(IMPACT_DEBOUNCE_MS - (nowMs - lastImpactMs)));
         }
+        else
+        {
+            // 👈 THÊM DÒNG NÀY: log khi AI từ chối nhưng G-peak mạnh
+            LOG_WARN("DETECT", "AI REJECT: p=%.3f < %.3f | peak=%.2fg (du manh nhung AI khong nhan dien)",
+                     p, IMPACT_THRESH, g_peak);
+        }
     }
 
     if (impact_candidate && impactCandidateCount >= IMPACT_CONFIRM_WINDOWS && !inCooldown)
     {
-        impact_flag = 1;
         lastImpactMs = nowMs;
+        gFallHandled = true; // chặn cascade từ fall detector
+        gFallCooldownStartMs = nowMs;
         impactCandidateCount = 0;
         gImpactCount++;
 
@@ -287,12 +303,10 @@ static void run_detection_window()
         // 2.1: Fall Detection - kiểm tra ngã
         // ============================================
         const FallResult *fall = fall_detector_check();
-        bool isFall = fall && fall->isTilted;
+        bool isFall = fall && fall->isFallen;
 
         if (isFall)
         {
-            fall_flag = 1;
-            event_type = "fall_detected";
             gFallCount++;
             ride_state_trigger_fall();
             LOG_RAW("\n");
@@ -305,11 +319,12 @@ static void run_detection_window()
         }
         else
         {
-            event_type = "impact_detected";
             LOG_RAW("\n");
             LOG_RAW("************************************************************\n");
             LOG_RAW("***           PHAT HIEN VA CHAM!                         ***\n");
-            LOG_RAW("***   p=%.3f  peak=%.2fg                                ***\n", p, g_peak);
+            LOG_RAW("***   p=%.3f  peak=%.2fg  %s                             ***\n",
+                    p, g_peak,
+                    brute_force ? "BRUTE-FORCE (bypass AI)" : "AI confirmed");
             LOG_RAW("************************************************************\n");
             LOG_RAW("\n");
         }
@@ -372,9 +387,36 @@ static void run_detection_window()
         }
 
         // ============================================
+        // Gửi ngay impact_alert JSON qua BLE cho Flutter gọi điện
+        // ============================================
+        if (ble_is_connected())
+        {
+            char bleJson[384];
+            snprintf(bleJson, sizeof(bleJson),
+                     "{\"type\":\"impact_alert\",\"schema_version\":2,\"helmet_id\":\"H001\","
+                     "\"gps\":{\"lat\":%.6f,\"lon\":%.6f,\"speed_kmh\":%.2f,\"valid\":%s},"
+                     "\"impact\":{\"detected\":true,\"ai_p\":%.3f,\"peak_g\":%.3f,\"event_type\":\"%s\"},"
+                     "\"ts\":%lu}\n",
+                     alertLat, alertLon, alertSpeed,
+                     alertGpsValid ? "true" : "false",
+                     p, g_peak,
+                     isFall ? "fall_detected" : "impact_detected",
+                     (unsigned long)nowMs);
+            ble_manager_send_text(bleJson);
+            LOG_INFO("BLE", "Da gui impact_alert JSON (AI: p=%.3f peak=%.2fg, %lu bytes)",
+                     p, g_peak, (unsigned long)strlen(bleJson));
+        }
+
+        // ============================================
         // GP5: BLE Mesh broadcast
         // ============================================
         ble_mesh_broadcast_impact(alertLat, alertLon, g_peak, p, alertGpsValid, false);
+
+        // ============================================
+        // GP7: BLE Emergency Beacon - SOS cho phone lạ
+        // ============================================
+        emergency_beacon_start(alertLat, alertLon, g_peak, p, isFall,
+                               alertGpsValid ? lastGps.satellites : 0);
     }
     else if ((nowMs - lastDebugPrintMs) >= DEBUG_PRINT_PERIOD_MS || impact_candidate)
     {
@@ -384,54 +426,10 @@ static void run_detection_window()
             gPeakGMax30s = g_peak;
         if (p > gAiPMax30s)
             gAiPMax30s = p;
-        LOG_DBG("CHECK", "p=%.3f peak=%.2fg cand=%d cnt=%d",
-                p, g_peak, impact_candidate ? 1 : 0, impactCandidateCount);
+        LOG_DBG("CHECK", "p=%.3f peak=%.2fg cand=%d cnt=%d | BF=%s (thres=%.1fg)",
+                p, g_peak, impact_candidate ? 1 : 0, impactCandidateCount,
+                brute_force ? "YES" : "no", BRUTE_FORCE_G_MIN);
     }
-
-    updateGpsSnapshot();
-    updateGpsAge();
-    printGpsStatus(nowMs);
-
-    // ===== 5) Gửi JSON telemetry nâng cao qua BLE =====
-    // Thêm: pitch, roll, angular_velocity, ride_state, fall_detected, gps_source
-    const char *gpsSource = lastGps.valid ? "neo6m" : (gps_cache_is_valid() ? "cache" : "none");
-    const FallResult *fallStatus = fall_detector_check();
-    float pitch = fallStatus ? fallStatus->pitchDeg : 0.0f;
-    float roll = fallStatus ? fallStatus->rollDeg : 0.0f;
-    float angVel = fallStatus ? fallStatus->angularVelDps : 0.0f;
-
-    char json[768];
-    snprintf(json, sizeof(json),
-             "{\"type\":\"telemetry\",\"schema_version\":3,\"helmet_id\":\"H001\",\"device_type\":\"helmet\","
-             "\"gps\":{\"lat\":%.6f,\"lon\":%.6f,\"speed_kmh\":%.2f,\"satellites\":%u,\"hdop\":%.2f,\"source\":\"%s\"},"
-             "\"imu\":{\"pitch_deg\":%.1f,\"roll_deg\":%.1f,\"angular_vel_dps\":%.1f},"
-             "\"impact\":{\"detected\":%s,\"ai_p\":%.3f,\"peak_g\":%.3f,\"confidence\":%.3f,\"event_type\":\"%s\"},"
-             "\"state\":{\"ride_state\":\"%s\",\"fall_detected\":%s,\"uptime_s\":%lu},"
-             "\"firmware\":{\"version\":\"2.0.0\",\"build\":\"esp32-fall-detect\"},"
-             "\"time\":{\"utc\":\"%04u-%02u-%02uT%02u:%02u:%02uZ\"},"
-             "\"ts\":\"%lu\"}",
-             lastGps.valid ? lastGps.lat : 0.0,
-             lastGps.valid ? lastGps.lon : 0.0,
-             lastGps.speedKmh,
-             lastGps.satellites,
-             lastGps.hdop,
-             gpsSource,
-             pitch, roll, angVel,
-             impact_flag ? "true" : "false",
-             p, g_peak, p,
-             event_type,
-             ride_state_name(),
-             fall_flag ? "true" : "false",
-             (unsigned long)(millis() / 1000),
-             (unsigned)lastGps.year,
-             (unsigned)lastGps.month,
-             (unsigned)lastGps.day,
-             (unsigned)lastGps.hour,
-             (unsigned)lastGps.minute,
-             (unsigned)lastGps.second,
-             (unsigned long)(millis()));
-
-    ble_send_text(json);
 
     // ===== 6) Trượt cửa sổ: giữ lại 256 mẫu cuối =====
     const int HALF = WIN_N / 2;
@@ -502,6 +500,16 @@ void setup()
     // ============================================
     gps_cache_init();
 
+    // ============================================
+    // GP6: GPS Selector - luân phiên NEO-6M / Phone
+    // ============================================
+    gps_selector_init();
+
+    // ============================================
+    // GP7: BLE Emergency Beacon
+    // ============================================
+    emergency_beacon_init();
+
     // Khởi tạo model logistic
     model_init(gModel);
 
@@ -533,15 +541,202 @@ void setup()
 void loop()
 {
     uint32_t nowUs = micros();
+    uint32_t nowMs = millis();
 
-    // Lấy mẫu đúng tần số SAMPLE_RATE_HZ (ở config.h bạn set = 1000)
+    // ============================================
+    // 1) IMU Sampling + GPS @ SAMPLE_RATE_HZ (1000Hz)
+    // ============================================
     if (nowUs - lastSampleUs >= PERIOD_US)
     {
         lastSampleUs += PERIOD_US;
 
         sampleImuAndUpdateBuffer();
-        run_detection_window();
+        updateGpsSnapshot();
+        updateGpsAge();
+        printGpsStatus(nowMs);
+
+        // ===== Gửi JSON telemetry nâng cao qua BLE (tần suất theo sample rate, tự throttle) =====
+        {
+            static uint32_t lastBleTelemetryMs = 0;
+            if (nowMs - lastBleTelemetryMs >= 200) // gửi BLE telemetry mỗi 200ms
+            {
+                lastBleTelemetryMs = nowMs;
+
+                // GPS Selector: lấy dữ liệu từ nguồn tốt nhất (NEO-6M hoặc Phone)
+                double selLat, selLon;
+                float selSpeed, selHdop;
+                uint8_t selSats;
+                bool selValid = gps_selector_get_fix(selLat, selLon, selSpeed, selSats, selHdop);
+                const char *gpsSource = gps_selector_source_name();
+                int gpsScore = gps_selector_get_score();
+
+                const FallResult *fallStatus = fall_detector_check();
+                float pitch = fallStatus ? fallStatus->pitchDeg : 0.0f;
+                float roll = fallStatus ? fallStatus->rollDeg : 0.0f;
+                float angVel = fallStatus ? fallStatus->angularVelDps : 0.0f;
+
+                char json[768];
+                snprintf(json, sizeof(json),
+                         "{\"type\":\"telemetry\",\"schema_version\":5,\"helmet_id\":\"H001\",\"device_type\":\"helmet\","
+                         "\"gps\":{\"lat\":%.6f,\"lon\":%.6f,\"speed_kmh\":%.2f,\"satellites\":%u,\"hdop\":%.2f,\"source\":\"%s\",\"score\":%d},"
+                         "\"imu\":{\"pitch_deg\":%.1f,\"roll_deg\":%.1f,\"angular_vel_dps\":%.1f},"
+                         "\"impact\":{\"detected\":%s,\"ai_p\":%.3f,\"peak_g\":%.3f,\"confidence\":%.3f,\"event_type\":\"%s\"},"
+                         "\"state\":{\"ride_state\":\"%s\",\"fall_detected\":%s,\"uptime_s\":%lu},"
+                         "\"firmware\":{\"version\":\"2.2.0\",\"build\":\"esp32-brute-force\"},"
+                         "\"time\":{\"utc\":\"%04u-%02u-%02uT%02u:%02u:%02uZ\"},"
+                         "\"ts\":\"%lu\"}",
+                         selValid ? selLat : (lastGps.valid ? lastGps.lat : 0.0),
+                         selValid ? selLon : (lastGps.valid ? lastGps.lon : 0.0),
+                         selValid ? selSpeed : lastGps.speedKmh,
+                         selValid ? selSats : lastGps.satellites,
+                         selValid ? selHdop : lastGps.hdop,
+                         gpsSource,
+                         gpsScore,
+                         pitch, roll, angVel,
+                         "false",
+                         0.0f, 0.0f, 0.0f,
+                         "none",
+                         ride_state_name(),
+                         fall_detector_is_fallen() ? "true" : "false",
+                         (unsigned long)(nowMs / 1000),
+                         (unsigned)lastGps.year,
+                         (unsigned)lastGps.month,
+                         (unsigned)lastGps.day,
+                         (unsigned)lastGps.hour,
+                         (unsigned)lastGps.minute,
+                         (unsigned)lastGps.second,
+                         (unsigned long)(nowMs));
+
+                if (ble_is_connected())
+                {
+                    ble_send_text(json);
+                }
+            }
+        }
     }
+
+    // ============================================
+    // 2) Impact Detection @ INFER_PERIOD_MS (500ms)
+    // ============================================
+    {
+        static uint32_t lastInferMs = 0;
+        if (nowMs - lastInferMs >= INFER_PERIOD_MS)
+        {
+            lastInferMs = nowMs;
+            run_detection_window();
+        }
+    }
+
+    // ============================================
+    // 3) Fall Detector DIRECT CHECK (không phụ thuộc ML)
+    //    Chạy độc lập với impact detection để bắt được
+    //    mọi tình huống ngã thực sự.
+    // ============================================
+    {
+        static uint32_t lastFallCheckMs = 0;
+        static uint32_t fallDebounceStartMs = 0;
+        static bool fallPending = false;
+
+        // Kiểm tra fall detector mỗi 200ms
+        if (nowMs - lastFallCheckMs >= 200)
+        {
+            lastFallCheckMs = nowMs;
+            const FallResult *fr = fall_detector_check();
+            // gFallHandled: đã xử lý fall này, chặn re-trigger cho đến khi người dùng ACK "TÔI ỔN"
+            if (fr && fr->isFallen && !gFallHandled)
+            {
+                if (!fallPending)
+                {
+                    fallPending = true;
+                    fallDebounceStartMs = nowMs;
+                    LOG_WARN("FALL", "Phat hien nghi nga: tilt=%.1f gyro=%.1f - cho xac nhan...",
+                             fr->tiltMagnitude, fr->angularVelDps);
+                }
+                // Xác nhận sau 800ms duy trì trạng thái ngã
+                else if (nowMs - fallDebounceStartMs > 800)
+                {
+                    // Chỉ trigger nếu chưa trong cooldown impact
+                    if (nowMs - lastImpactMs > IMPACT_DEBOUNCE_MS)
+                    {
+                        lastImpactMs = nowMs;
+                        gFallCount++;
+                        fallPending = false;
+
+                        ride_state_trigger_fall();
+
+                        LOG_RAW("\n");
+                        LOG_RAW("************************************************************\n");
+                        LOG_RAW("***    FALL DETECTOR: PHAT HIEN NGA XE!                 ***\n");
+                        LOG_RAW("***    tilt=%.1f°  gyro=%.1f dps  pitch=%.1f  roll=%.1f ***\n",
+                                fr->tiltMagnitude, fr->angularVelDps, fr->pitchDeg, fr->rollDeg);
+                        LOG_RAW("************************************************************\n");
+                        LOG_RAW("\n");
+
+                        // Gửi Telegram alert
+                        float lat = lastGps.valid ? lastGps.lat : 0.0f;
+                        float lon = lastGps.valid ? lastGps.lon : 0.0f;
+                        float spd = lastGps.valid ? lastGps.speedKmh : 0.0f;
+                        telegram_send_impact_alert(lat, lon, spd, 0.0f, 0.0f, lastGps.valid);
+
+                        char fallMsg[256];
+                        snprintf(fallMsg, sizeof(fallMsg),
+                                 "🛑 *PHAT HIEN NGA XE! (Fall Detector)*\n"
+                                 "Goc nghieng: %.0f°\n"
+                                 "Van toc goc: %.0f dps\n"
+                                 "⚠️ Kiem tra ngay!",
+                                 fr->tiltMagnitude, fr->angularVelDps);
+                        telegram_send_message(fallMsg);
+
+                        // BLE Mesh broadcast
+                        ble_mesh_broadcast_impact(lat, lon, 0.0f, 0.0f, lastGps.valid, true);
+
+                        // Buffer
+                        impact_buffer_push(lat, lon, spd, 0.0f, 0.0f, lastGps.valid);
+
+                        // Gửi ngay impact_alert JSON qua BLE cho Flutter gọi điện
+                        if (ble_is_connected())
+                        {
+                            char bleJson[384];
+                            snprintf(bleJson, sizeof(bleJson),
+                                     "{\"type\":\"impact_alert\",\"schema_version\":2,\"helmet_id\":\"H001\","
+                                     "\"gps\":{\"lat\":%.6f,\"lon\":%.6f,\"speed_kmh\":%.2f,\"valid\":%s},"
+                                     "\"impact\":{\"detected\":true,\"ai_p\":%.3f,\"peak_g\":%.2f,\"event_type\":\"fall_detected\","
+                                     "\"tilt_deg\":%.1f,\"gyro_dps\":%.1f},"
+                                     "\"ts\":%lu}\n",
+                                     lat, lon, spd,
+                                     lastGps.valid ? "true" : "false",
+                                     gAiPMax30s, gPeakGMax30s,
+                                     fr->tiltMagnitude, fr->angularVelDps,
+                                     (unsigned long)nowMs);
+                            ble_manager_send_text(bleJson);
+                            LOG_INFO("BLE", "Da gui impact_alert JSON (%lu bytes)", (unsigned long)strlen(bleJson));
+                        }
+
+                        // Chặn re-trigger: chỉ trigger lại khi fall_detector hồi phục
+                        gFallHandled = true;
+                        gFallCooldownStartMs = nowMs;
+                    }
+                }
+            }
+            else if (!fr || !fr->isFallen)
+            {
+                // Hết trạng thái ngã → reset tất cả
+                if (fallPending)
+                {
+                    LOG_DBG("FALL", "Huy fall pending - da dung day");
+                }
+                fallPending = false;
+                gFallHandled = false;
+                fallDebounceStartMs = 0;
+            }
+            // else: isFallen=true nhưng fallHandled đang chặn → không làm gì, giữ trạng thái
+        }
+    }
+
+    // ============================================
+    // 4) Telegram: xử lý tin nhắn đến
+    // ============================================
+    telegram_loop();
 
     // ============================================
     // GIẢI PHÁP 2+3: Heartbeat + BLE maintenance
@@ -549,14 +744,56 @@ void loop()
     ble_manager_heartbeat_loop();
 
     // ============================================
+    // GP6: GPS Selector - đánh giá & luân phiên nguồn
+    // ============================================
+    {
+        static uint32_t lastGpsSelEvalMs = 0;
+        if (nowMs - lastGpsSelEvalMs >= 1000) // đánh giá mỗi 1 giây
+        {
+            lastGpsSelEvalMs = nowMs;
+            gps_selector_evaluate();
+        }
+    }
+    // ============================================
+    // In trạng thái GPS Selector định kỳ (mỗi 30s)
+    // ============================================
+    {
+        static uint32_t lastGpsSelPrintMs = 0;
+        if (nowMs - lastGpsSelPrintMs > 30000)
+        {
+            lastGpsSelPrintMs = nowMs;
+            gps_selector_print();
+        }
+    }
+
+    // ============================================
     // In trạng thái Ride State định kỳ (mỗi 30s)
     // ============================================
     {
-        uint32_t nowMs = millis();
         if (nowMs - lastRidePrintMs > 30000)
         {
             lastRidePrintMs = nowMs;
             ride_state_print();
+        }
+    }
+
+    // ============================================
+    // DEBUG: In IMU pitch/roll/tilt mỗi 2 giây
+    // (để xác nhận cảm biến IMU đang hoạt động)
+    // ============================================
+    {
+        static uint32_t lastImuPrintMs = 0;
+        if (nowMs - lastImuPrintMs > 2000)
+        {
+            lastImuPrintMs = nowMs;
+            const FallResult *fr = fall_detector_check();
+            if (fr)
+            {
+                LOG_INFO("IMU", "pitch=%.1f roll=%.1f tilt=%.1f gyro=%.1f dps | fallen=%s tilted=%s",
+                         fr->pitchDeg, fr->rollDeg, fr->tiltMagnitude, fr->angularVelDps,
+                         fr->isFallen ? "YES" : "no",
+                         fr->isTilted ? "YES" : "no");
+            }
         }
     }
 
@@ -574,7 +811,6 @@ void loop()
     // GIẢI PHÁP 1: Retry gửi impact events pending
     // ============================================
     {
-        uint32_t nowMs = millis();
         static uint32_t lastRetryMs = 0;
 
         if (nowMs - lastRetryMs >= IMPACT_RETRY_INTERVAL_MS)
@@ -633,7 +869,6 @@ void loop()
     // Periodic stats summary (60s)
     // ============================================
     {
-        uint32_t nowMs = millis();
         if (nowMs - lastStatsPrintMs > STATS_PERIOD_MS)
         {
             lastStatsPrintMs = nowMs;
@@ -675,6 +910,7 @@ void loop()
         LOG_OK("ACK", "Nguoi dung xac nhan an toan!");
         ride_state_ack();
         fall_detector_reset();
+        emergency_beacon_stop(); // GP7: tat beacon SOS
     }
 
     // 🧪 XỬ LÝ TEST IMPACT - giả lập va chạm

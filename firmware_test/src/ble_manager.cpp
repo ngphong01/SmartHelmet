@@ -1,4 +1,6 @@
 #include "ble_manager.h"
+#include "gps_cache.h"
+#include "gps_selector.h"
 
 // =========================
 // UUID - Nordic UART Service
@@ -17,7 +19,7 @@ static NimBLECharacteristic *gHeartbeatNotifyChar = nullptr;
 static NimBLECharacteristic *gHeartbeatWriteChar = nullptr;
 
 static BlePhoneInfo gPhones[BLE_MAX_CONNECTIONS];
-static BleConnectionStats gStats = {0};
+static BleConnectionStats gStats = {};
 
 // Trạng thái điều khiển từ app
 static bool gBleStreamOn = false;
@@ -70,6 +72,23 @@ public:
             gBleTestImpact = true;
             Serial.println("[BLE][TEST] Kich hoat va cham gia lap!");
         }
+        else if (v.rfind("GPS:", 0) == 0)
+        {
+            // Nhận GPS từ điện thoại: "GPS:lat,lon,speedKmh,sats"
+            // VD: "GPS:10.762622,106.660172,25.5,12"
+            float lat = 0, lon = 0, speed = 0;
+            int sats = 0;
+            if (sscanf(v.c_str(), "GPS:%f,%f,%f,%d", &lat, &lon, &speed, &sats) >= 2)
+            {
+                gps_cache_update((double)lat, (double)lon, speed, 1.0f, (uint8_t)sats);
+                // Cập nhật GPS Selector → để luân phiên NEO-6M / Phone
+                // Phone GPS accuracy ước tính từ số vệ tinh: nhiều vệ tinh → accuracy tốt
+                float accuracyEst = (sats >= 12) ? 3.0f : (sats >= 8) ? 5.0f : (sats >= 5) ? 10.0f : 20.0f;
+                gps_selector_update_phone((double)lat, (double)lon, speed, (uint8_t)sats, accuracyEst);
+                Serial.printf("[BLE][GPS] Nhan GPS tu phone: lat=%.6f lon=%.6f speed=%.1f sats=%d (→ selector)\n",
+                              lat, lon, speed, sats);
+            }
+        }
         else if (v == "PONG")
         {
             // Heartbeat response từ phone - cập nhật lastHeartbeat cho phone đang kết nối
@@ -79,6 +98,7 @@ public:
                 {
                     gPhones[i].lastHeartbeatMs = millis();
                     gPhones[i].state = BLE_HEARTBEAT_OK;
+                    gPhones[i].heartbeatTimeoutLogged = false;
                 }
             }
         }
@@ -102,6 +122,7 @@ class HeartbeatRxCallback : public NimBLECharacteristicCallbacks
                 {
                     gPhones[i].lastHeartbeatMs = millis();
                     gPhones[i].state = BLE_HEARTBEAT_OK;
+                    gPhones[i].heartbeatTimeoutLogged = false;
                 }
             }
         }
@@ -128,6 +149,7 @@ class ServerCallbacks : public NimBLEServerCallbacks
                 gPhones[i].connectedSinceMs = millis();
                 gPhones[i].lastHeartbeatMs = millis();
                 gPhones[i].isPrimary = (gStats.totalReconnects == 0 && i == 0);
+                gPhones[i].heartbeatTimeoutLogged = false;
                 gStats.totalReconnects++;
                 gStats.lastDisconnectMs = 0;
 
@@ -268,6 +290,10 @@ void ble_manager_init()
 // GỬI DỮ LIỆU
 // =========================
 
+// Rate-limit cảnh báo BLE: chỉ in 1 lần khi mất kết nối
+static bool gBleWarnedSendBytes = false;
+static bool gBleWarnedSendText = false;
+
 bool ble_manager_send_bytes(const uint8_t *data, size_t len)
 {
     // Gửi tới tất cả phone đang kết nối
@@ -284,7 +310,15 @@ bool ble_manager_send_bytes(const uint8_t *data, size_t len)
 
     if (!anySent)
     {
-        Serial.println("[BLE][WARN] Khong co phone nao ket noi de gui du lieu!");
+        if (!gBleWarnedSendBytes)
+        {
+            Serial.println("[BLE][WARN] Khong co phone nao ket noi de gui du lieu!");
+            gBleWarnedSendBytes = true;
+        }
+    }
+    else
+    {
+        gBleWarnedSendBytes = false; // Reset khi có phone kết nối lại
     }
     return anySent;
 }
@@ -297,7 +331,11 @@ bool ble_manager_send_text(const char *s)
     // Kiểm tra có phone nào kết nối không
     if (!ble_manager_is_any_connected())
     {
-        Serial.println("[BLE][WARN] Khong the gui text - tat ca phone deu mat ket noi");
+        if (!gBleWarnedSendText)
+        {
+            Serial.println("[BLE][WARN] Khong the gui text - tat ca phone deu mat ket noi");
+            gBleWarnedSendText = true;
+        }
         return false;
     }
 
@@ -311,31 +349,13 @@ bool ble_manager_send_text(const char *s)
     {
         size_t chunkLen = (len - offset > CHUNK) ? CHUNK : (len - offset);
 
-        if (offset + chunkLen >= len && chunkLen < CHUNK)
+        for (int i = 0; i < BLE_MAX_CONNECTIONS; i++)
         {
-            uint8_t buf[CHUNK + 1];
-            memcpy(buf, s + offset, chunkLen);
-            buf[chunkLen] = '\n';
-            for (int i = 0; i < BLE_MAX_CONNECTIONS; i++)
+            if (gPhones[i].state >= BLE_CONNECTED && gNotifyChars[0])
             {
-                if (gPhones[i].state >= BLE_CONNECTED && gNotifyChars[0])
-                {
-                    gNotifyChars[0]->setValue(buf, chunkLen + 1);
-                    gNotifyChars[0]->notify();
-                    anySent = true;
-                }
-            }
-        }
-        else
-        {
-            for (int i = 0; i < BLE_MAX_CONNECTIONS; i++)
-            {
-                if (gPhones[i].state >= BLE_CONNECTED && gNotifyChars[0])
-                {
-                    gNotifyChars[0]->setValue((uint8_t *)(s + offset), chunkLen);
-                    gNotifyChars[0]->notify();
-                    anySent = true;
-                }
+                gNotifyChars[0]->setValue((uint8_t *)(s + offset), chunkLen);
+                gNotifyChars[0]->notify();
+                anySent = true;
             }
         }
 
@@ -343,25 +363,18 @@ bool ble_manager_send_text(const char *s)
         delay(25);
     }
 
-    if (len > 0)
+    // Luôn gửi newline delimiter ở cuối để Flutter buffer split chính xác
+    delay(10);
+    for (int i = 0; i < BLE_MAX_CONNECTIONS; i++)
     {
-        size_t lastChunkLen = len % CHUNK;
-        if (lastChunkLen == 0)
-            lastChunkLen = CHUNK;
-        if (lastChunkLen == CHUNK)
+        if (gPhones[i].state >= BLE_CONNECTED && gNotifyChars[0])
         {
-            delay(10);
-            for (int i = 0; i < BLE_MAX_CONNECTIONS; i++)
-            {
-                if (gPhones[i].state >= BLE_CONNECTED && gNotifyChars[0])
-                {
-                    gNotifyChars[0]->setValue((uint8_t *)"\n", 1);
-                    gNotifyChars[0]->notify();
-                }
-            }
+            gNotifyChars[0]->setValue((uint8_t *)"\n", 1);
+            gNotifyChars[0]->notify();
         }
     }
 
+    gBleWarnedSendText = false; // Reset warning khi gửi thành công
     return anySent;
 }
 
@@ -409,8 +422,13 @@ void ble_manager_heartbeat_loop()
             uint32_t elapsed = now - gPhones[i].lastHeartbeatMs;
             if (elapsed > BLE_HEARTBEAT_TIMEOUT_MS)
             {
-                Serial.printf("[BLE][TIMEOUT][Phone%d] Heartbeat timeout %lu ms\n",
-                              i, (unsigned long)elapsed);
+                // Chỉ log một lần, tránh spam serial
+                if (!gPhones[i].heartbeatTimeoutLogged)
+                {
+                    Serial.printf("[BLE][TIMEOUT][Phone%d] Heartbeat timeout %lu ms\n",
+                                  i, (unsigned long)elapsed);
+                    gPhones[i].heartbeatTimeoutLogged = true;
+                }
                 gPhones[i].state = BLE_CONNECTED; // vẫn connected nhưng không khỏe
             }
         }

@@ -70,7 +70,6 @@ void fall_detector_update(float ax_g, float ay_g, float az_g,
 
     // Fall = tilted AND spinning (đang ngã, không phải đã nằm yên)
     // HOẶC tilted duy trì > FALL_HOLD_MS (đã ngã xong, đang nằm)
-    bool sustained = tilted && ((now - gLastTiltedMs) < 500); // tilted trong 500ms gần đây
 
     if ((tilted && spinning) || (tilted && (now - gFallStartMs > FALL_HOLD_MS && gFallStartMs > 0)))
     {

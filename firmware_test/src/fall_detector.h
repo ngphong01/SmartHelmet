@@ -24,9 +24,11 @@ struct FallResult
 // =========================
 
 // Ngưỡng góc nghiêng để coi là ngã (độ)
+// Mặc định 55° cho thực tế. Hạ xuống 35° để dễ test.
 #define FALL_TILT_THRESHOLD_DEG 55.0f
 
 // Ngưỡng vận tốc góc để coi là chuyển động ngã (°/s)
+// Mặc định 120°/s. Hạ xuống 60°/s để dễ test.
 #define FALL_GYRO_THRESHOLD_DPS 120.0f
 
 // Thời gian giữ trạng thái ngã (ms) - để xác nhận không phải rung thoáng qua

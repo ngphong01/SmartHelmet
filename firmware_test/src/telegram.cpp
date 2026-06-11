@@ -4,47 +4,10 @@
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
 #include "secrets.h"
+#include "wifi_manager.h"
 
 static WiFiClientSecure gWifiClient;
 static UniversalTelegramBot *gBot = nullptr;
-static bool gWiFiConnected = false;
-static uint32_t lastReconnectAttempt = 0;
-static const uint32_t RECONNECT_INTERVAL_MS = 10000; // thử kết nối lại mỗi 10s
-
-// =========================
-// KẾT NỐI WiFi
-// =========================
-
-static bool connect_wifi()
-{
-    if (WiFi.status() == WL_CONNECTED)
-        return true;
-
-    Serial.printf("[WiFi] Dang ket noi %s ...\n", WIFI_SSID);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-    // Chờ tối đa 15 giây
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30)
-    {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        Serial.println();
-        Serial.print("[WiFi][OK] Da ket noi, IP: ");
-        Serial.println(WiFi.localIP());
-        return true;
-    }
-
-    Serial.println();
-    Serial.println("[WiFi][LOI] Khong the ket noi WiFi");
-    return false;
-}
 
 // =========================
 // KHỞI TẠO
@@ -55,9 +18,8 @@ void telegram_init()
     // Cấu hình WiFi Client bảo mật (bỏ qua xác thực chứng chỉ cho Telegram)
     gWifiClient.setInsecure();
 
-    gWiFiConnected = connect_wifi();
-
-    if (gWiFiConnected)
+    // Dùng wifi_manager để kiểm tra kết nối (không tự ý WiFi.begin nữa)
+    if (wifi_manager_is_connected())
     {
         gBot = new UniversalTelegramBot(TELEGRAM_BOT_TOKEN, gWifiClient);
         Serial.println("[Telegram][OK] Bot da san sang");
@@ -67,7 +29,7 @@ void telegram_init()
     }
     else
     {
-        Serial.println("[Telegram][LOI] Bot chua san sang (khong co WiFi)");
+        Serial.println("[Telegram][LOI] Bot chua san sang (chua co WiFi). Se tu dong kich hoat khi co WiFi.");
     }
 }
 
@@ -77,23 +39,22 @@ void telegram_init()
 
 bool telegram_send_message(const char *message)
 {
-    if (!gBot)
+    // Khởi tạo bot nếu chưa có nhưng WiFi đã sẵn sàng
+    if (!gBot && wifi_manager_is_connected())
     {
-        Serial.println("[Telegram][LOI] Bot chua duoc khoi tao");
-        return false;
+        gBot = new UniversalTelegramBot(TELEGRAM_BOT_TOKEN, gWifiClient);
+        Serial.println("[Telegram][OK] Bot da san sang (lazy init)");
     }
 
-    // Kiểm tra và kết nối lại WiFi nếu cần
-    if (WiFi.status() != WL_CONNECTED)
+    if (!gBot)
     {
-        uint32_t now = millis();
-        if (now - lastReconnectAttempt >= RECONNECT_INTERVAL_MS)
-        {
-            lastReconnectAttempt = now;
-            gWiFiConnected = connect_wifi();
-        }
-        if (!gWiFiConnected)
-            return false;
+        return false; // không log spam
+    }
+
+    // Kiểm tra WiFi qua wifi_manager
+    if (!wifi_manager_is_connected())
+    {
+        return false;
     }
 
     bool ok = gBot->sendMessage(TELEGRAM_CHAT_ID, message, "Markdown");

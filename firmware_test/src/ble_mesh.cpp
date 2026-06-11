@@ -15,7 +15,6 @@ static uint32_t gScanIntervalMs = 1000; // scan mỗi 1s
 
 static ImpactBeaconData gCurrentBeacon;
 static ImpactBeaconCallback gBeaconCallback = nullptr;
-static NimBLEAdvertising *gMeshAdv = nullptr;
 static NimBLEScan *gMeshScan = nullptr;
 
 // Số beacon phát hiện gần đây
@@ -116,30 +115,28 @@ static void do_broadcast()
         return;
     }
 
-    // Gửi beacon
+    // Gửi beacon định kỳ
     if (now - gLastBroadcastMs >= gBroadcastIntervalMs)
     {
         gLastBroadcastMs = now;
+
+        // Dùng Manufacturer Specific Data trong Scan Response
+        // Cập nhật dữ liệu beacon
+        gCurrentBeacon.timestamp = millis(); // cập nhật timestamp mới nhất
 
         uint8_t payload[31];
         size_t payloadLen = 0;
         build_beacon_payload(payload, &payloadLen, gCurrentBeacon);
 
-        // Dùng legacy advertising để broadcast
-        // (tạo advertisement riêng không ảnh hưởng BLE server chính)
+        // Cập nhật manufacturer data vào advertisement hiện tại
         NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
         if (adv)
         {
-            // Tạm dừng advertising hiện tại
-            // adv->stop(); -- không nên stop vì sẽ ảnh hưởng BLE server
-
-            // Thay vào đó dùng scan response để gửi beacon
-            // (cách này không lý tưởng nhưng không conflict với BLE server)
+            NimBLEAdvertisementData scanResp;
+            scanResp.setManufacturerData(std::string((char *)payload, payloadLen));
+            adv->setScanResponseData(scanResp);
+            // Không cần restart advertising - scan response tự động được gửi khi có scan request
         }
-
-        // Fallback: dùng NimBLEAdvertisementData manual
-        // Đơn giản nhất là gửi qua serial để test
-        // Trong thực tế cần dual-mode BLE hoặc ESP-IDF BLE Mesh
     }
 }
 

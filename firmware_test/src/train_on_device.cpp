@@ -65,7 +65,7 @@ void run_offline_training(LogisticModel &model)
     const int STEP = WIN_N / 2; // overlap 50%
     const int EPOCHS = 5;       // tăng epoch để model học tốt hơn
 
-    const float ACCEL_SENS = 8192.0f;
+    const float ACCEL_SENS = 2048.0f; // phải khớp với ACCEL_SENS_16G trong config.h
 
     if (TRAIN_SAMPLES < WIN_N)
     {
