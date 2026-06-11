@@ -152,6 +152,37 @@ flutter run
 - Flash: ~1.5MB / 2MB (80%)
 - BLE: 2 phones simultaneous, MTU 185, heartbeat 5s
 
+## 🔮 Hướng tương lai (Roadmap)
+
+### ✅ Đã hoàn thành
+- [x] AI phát hiện va chạm (Logistic Regression + FFT)
+- [x] Phát hiện ngã xe (tilt + gyro)
+- [x] GPS Selector — luân phiên NEO-6M & Phone GPS
+- [x] BLE dual-phone + heartbeat
+- [x] Telegram alert qua WiFi
+- [x] BLE Mesh broadcast cho mũ lân cận
+- [x] BLE Emergency Beacon (SOS không cần ghép đôi)
+- [x] Flutter app: gọi khẩn cấp + voice TTS
+- [x] Impact buffer + retry (NVS persistence)
+
+### 🚧 Đang phát triển
+- [ ] **Voice TTS tiếng Việt** — hoàn thiện engine, thêm fallback
+- [ ] **App Flutter background service** — nhận alert cả khi app bị kill
+- [ ] **SIM800L SMS** — gửi SMS trực tiếp từ ESP32 khi không có WiFi
+- [ ] **OTA firmware update** — cập nhật firmware từ xa qua WiFi/BLE
+
+### 📋 Kế hoạch
+- [ ] **Multi-helmet mesh network** — các mũ gần nhau tự động chuyển tiếp cảnh báo
+- [ ] **Cloud dashboard** — theo dõi realtime vị trí + trạng thái tất cả mũ
+- [ ] **AI model tuning** — fine-tune model với dữ liệu thực tế từ người dùng
+- [ ] **Pin & sạc** — thiết kế mạch pin Li-Po + sạc USB-C
+- [ ] **Vỏ chống nước IP65** — thiết kế enclosure cho phần cứng
+- [ ] **Phát hiện mất mũ** — cảnh báo khi mũ bị tháo ra không đúng cách
+- [ ] **Cảm biến nhịp tim** — tích hợp PPG sensor đo sinh hiệu
+- [ ] **Gọi 115 tự động** — tích hợp gọi cấp cứu khi phát hiện ngã nặng
+- [ ] **Định vị trong hầm/tòa nhà** — BLE indoor positioning khi mất GPS
+- [ ] **Cloud sync training data** — đồng bộ dữ liệu va chạm thật lên cloud để cải thiện model
+
 ## 🧪 Test
 
 Đập nhẹ vào mũ để test:
